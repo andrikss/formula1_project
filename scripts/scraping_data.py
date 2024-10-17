@@ -676,7 +676,7 @@ def fetch_race_results(year):
         races = data['MRData']['RaceTable']['Races']
         
         race_info = [] 
-        print('greska u fetchu')
+
         for race in races:
             race_details = {
                 'season': race['season'],
@@ -697,6 +697,7 @@ def fetch_race_results(year):
             }
 
             for result in race['Results']:
+
                 driver_info = {
                     'positionText': result['positionText'],
                     'points': result['points'],
@@ -784,6 +785,37 @@ def get_status_id(cursor, status_name):
     else:
         return None
     
+# time conversion 
+def convert_time_to_milliseconds(time_string):
+    milliseconds = 0
+
+    # Split the time string into minutes and seconds
+    time_parts = time_string.split(':')
+    
+    # Check if the time string is in the format "MM:SS.sss"
+    if len(time_parts) == 2:  # MM:SS.sss
+        minutes = int(time_parts[0])  # Get the minutes
+        seconds_millis = time_parts[1]  # Get the seconds and milliseconds
+    else:
+        # If there's no minutes part, it's in the format "SS.sss"
+        minutes = 0
+        seconds_millis = time_parts[0]
+
+    # Further split seconds and milliseconds
+    seconds_parts = seconds_millis.split('.')
+    seconds = int(seconds_parts[0])  # Get the seconds
+
+    # Check if milliseconds exist
+    if len(seconds_parts) > 1:
+        millis = int(seconds_parts[1])  # Get the milliseconds
+    else:
+        millis = 0  # Default to 0 if not provided
+
+    # Calculate total milliseconds
+    milliseconds = (minutes * 60 * 1000) + (seconds * 1000) + millis
+
+    return milliseconds
+
 # insert race results into db 
 def insert_race_results_into_db(race_results, cursor, race):
 
@@ -812,26 +844,22 @@ def insert_race_results_into_db(race_results, cursor, race):
         update_race_time(cursor, race_id, race['time'])
 
     # then circuit
-
     circuit_info = race['circuit']
-
-    circuit_id = get_circuit_id(circuit_info['circuitName'], circuit_info['lat'], circuit_info['long'])
+    circuit_id = get_circuit_id(cursor, circuit_info['circuitName'], circuit_info['location']['lat'], circuit_info['location']['long'])
 
     if circuit_id is None: 
         circuit_id = generate_id_from_string(f"{circuit_info['circuitName']}", cursor, 'dimensionCircuit', 'circuitId')
-
+        
         insert_circuit_query = sql.SQL("""
         INSERT INTO DimensionCircuit (circuitId, name, lat, lng, alt)
         VALUES (%s, %s, %s, %s, %s)
         ON CONFLICT (circuitId) DO NOTHING;
     """)
         
-        cursor.execute(insert_circuit_query, (circuit_id, circuit_info['circuitName'], circuit_info['lat'], circuit_info['long'], None))
+        cursor.execute(insert_circuit_query, (circuit_id, circuit_info['circuitName'], circuit_info['location']['lat'], circuit_info['location']['lng'], None))
 
     # then location
-
-    location_id = get_location_id(circuit_info['locality'], circuit_info['country'])
-
+    location_id = get_location_id(cursor, circuit_info['location']['locality'], circuit_info['location']['country'])
     if location_id is None:
         location_id =  get_next_location_id(cursor)
         cursor.execute(
@@ -842,93 +870,131 @@ def insert_race_results_into_db(race_results, cursor, race):
                 (location_id, circuit_info['locality'], circuit_info['country'])
             )
     
-    for result in race_results['results']: 
-        # DRIVER 
-        driver_info = result['driver']
-        driver_id = get_driver_id(cursor, driver_info['givenName'], driver_info['familyName'], driver_info['dateOfBirth'], driver_info['nationality'])
+    print('iznad fora sam')
+    for result in race_results:
+            # DRIVER 
+            print('driver')
+            driver_info = result['driver']
+            driver_id = get_driver_id(cursor, driver_info['givenName'], driver_info['familyName'], driver_info['dateOfBirth'], driver_info['nationality'])
 
-        if driver_id is None: 
-            driver_id = generate_id_from_string(f"{driver_info['givenName']}_{driver_info['familyName']}", cursor, "dimensiondriver", "driverId")
-            insert_driver_query = sql.SQL("""
-                INSERT INTO DimensionDriver (driverId, name, surname, dob, nationality)
-                VALUES (%s, %s, %s, %s, %s)
-                ON CONFLICT (driverId) DO NOTHING;
-            """)
-            cursor.execute(insert_driver_query, (driver_id,  driver_info['givenName'], driver_info['familyName'], driver_info['dateOfBirth'], driver_info['nationality']))
-            print(f"Inserted new driver: DriverID={driver_id}, GivenName={driver_info['givenName']}, FamilyName={driver_info['familyName']}, DateOfBirth={driver_info['dateOfBirth']}, Nationality={driver_info['nationality']}")
+            if driver_id is None: 
+                driver_id = generate_id_from_string(f"{driver_info['givenName']}_{driver_info['familyName']}", cursor, "dimensiondriver", "driverId")
+                insert_driver_query = sql.SQL("""
+                    INSERT INTO DimensionDriver (driverId, name, surname, dob, nationality)
+                    VALUES (%s, %s, %s, %s, %s)
+                    ON CONFLICT (driverId) DO NOTHING;
+                """)
+                cursor.execute(insert_driver_query, (driver_id,  driver_info['givenName'], driver_info['familyName'], driver_info['dateOfBirth'], driver_info['nationality']))
+                print(f"Inserted new driver: DriverID={driver_id}, GivenName={driver_info['givenName']}, FamilyName={driver_info['familyName']}, DateOfBirth={driver_info['dateOfBirth']}, Nationality={driver_info['nationality']}")
 
-        # CONSTRUCTOR
-        constructor_info = result['constructor']
-        constructor_id = get_constructor_id(cursor, constructor_info['name'], constructor_info['nationality'])
+            # CONSTRUCTOR
+            print('constructor')
+            constructor_info = result['constructor']
+            constructor_id = get_constructor_id(cursor, constructor_info['name'], constructor_info['nationality'])
 
-        if constructor_id is None: 
-            constructor_id = generate_id_from_string(f"{constructor_info['name']}_{constructor_info['nationality']}", cursor, "dimensiondriver", "driverId")
-            insert_constructor_query = sql.SQL(""" 
-                INSERT INTO DimensionConstructor (constructorId, name, nationality)
-                VALUES (%s, %s, %s)
-                ON CONFLICT (constructorId) DO NOTHING;
-            """)
-            cursor.execute(insert_constructor_query, (constructor_id, constructor_info['name'], constructor_info['nationality']))
-            print(f"Inserted new constructor: ConstructorID={constructor_id}, Name={constructor_info['name']}, Nationality={constructor_info['nationality']}")
+            if constructor_id is None: 
+                constructor_id = generate_id_from_string(f"{constructor_info['name']}_{constructor_info['nationality']}", cursor, "dimensiondriver", "driverId")
+                insert_constructor_query = sql.SQL(""" 
+                    INSERT INTO DimensionConstructor (constructorId, name, nationality)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (constructorId) DO NOTHING;
+                """)
+                cursor.execute(insert_constructor_query, (constructor_id, constructor_info['name'], constructor_info['nationality']))
+                print(f"Inserted new constructor: ConstructorID={constructor_id}, Name={constructor_info['name']}, Nationality={constructor_info['nationality']}")
 
-
-        # STATUS 
-        status_id = get_status_id(cursor, result['status'])
-
-        if status_id is None:
-            status_id = generate_id_from_string(result['status'], cursor, "dimensionStatus", "statusId")
-
-            insert_status_query = sql.SQL("""
-                INSERT INTO DimensionStatus (statusId, status)
-                VALUES (%s, %s)
-                ON CONFLICT (statusId) DO NOTHING;
-            """)
-
-            cursor.execute(insert_status_query, (status_id, result['status']))
-            print(f"Inserted new status: StatusID={status_id}, Name={result['status']}")
-
-        startPosition = int(result['grid'])
-        endPosition = int(result['positionText'])
-        rank = startPosition - endPosition
-        points = result['points']
-        laps = result['laps']
-        print('error je ovdje')
-        duration = result.get('Time', {}).get('millis', 'N/A')
-        fastestLap = result.get('FastestLap', {}).get('lap', 'N/A')
-        fastestLapTime = result.get()
-
-        # TO DO 
-        fastestLapSpeed = None
-        averageLapTime = None
-        pitStopDurationTotal = None
-
-
-        # checking duplicates 
-        check_query = sql.SQL("""
-            SELECT resultId FROM Fact_RaceResults
-            WHERE raceId = %s AND driverId = %s AND constructorId = %s AND circuitId = %s AND locationId = %s 
-            AND startPosition = %s AND endPosition = %s AND laps = %s;
-            """)
-        cursor.execute(check_query, (race_id, driver_id, constructor_id, circuit_id, location_id, startPosition, endPosition, laps))
-        existing_result = cursor.fetchone()
-
-        if existing_result is None: 
-            # finally, add the result
-            result_id = generate_id_from_string(f"{race_id}_{driver_id}_{constructor_id}_{startPosition}_{endPosition}", cursor, "fact_raceresults", "resultId")
-
-            insert_query = sql.SQL("""
-            INSERT INTO Fact_RaceResults (resultId, raceId, driverId, constructorId, locationId, statusId, startPosition, endPosition, rank, points, laps, duration, fastestLap, fastestLapTime, fastestLapSpeed, averageLapTime, pitStopDurationTotal)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT (resultId) DO NOTHING;
-        """)
         
-        cursor.execute(insert_query, (
-            result_id, race_id, driver_id, constructor_id, location_id, status_id, startPosition, endPosition, rank, points, 
-            laps, duration, fastestLap, fastestLapTime, fastestLapSpeed, averageLapTime, pitStopDurationTotal
-        ))
-        print(f"Inserted new race result: ResultID={result_id}, DriverID={driver_id}, ConstructorID={constructor_id}, Start={startPosition}, End={endPosition}, Laps={laps}")
-    else:
-        print(f"Result already exists for DriverID={driver_id}, ConstructorID={constructor_id}, Start={startPosition}, End={endPosition}, Laps={laps}")
+            # STATUS 
+            status_id = get_status_id(cursor, result['status'])
+            print('status')
+            if status_id is None:
+                status_id = generate_id_from_string(result['status'], cursor, "dimensionStatus", "statusId")
+
+                insert_status_query = sql.SQL("""
+                    INSERT INTO DimensionStatus (statusId, status)
+                    VALUES (%s, %s)
+                    ON CONFLICT (statusId) DO NOTHING;
+                """)
+
+                cursor.execute(insert_status_query, (status_id, result['status']))
+                print(f"Inserted new status: StatusID={status_id}, Name={result['status']}")
+
+            startPosition = int(result['grid'])
+            endPosition = int(result['positionText'])
+            rank = startPosition - endPosition
+            rank = int(rank)
+            # because end position is string in our DB becuase of 'D N E R' 
+            endPosition = str(result['positionText'])
+            points = float(result['points'])
+            laps = int(result['laps'])
+
+
+            # hard coding 
+            # will think about this later
+            duration = result.get('Time', {}).get('millis', None)
+            if duration is not None:
+                duration = convert_time_to_milliseconds(duration)
+                duration = int(duration)
+            else:
+                duration = 0
+
+            fastestLap = result.get('FastestLap', {}).get('lap', None)
+            if fastestLap is not None:
+                fastestLap = int(fastestLap)
+            else: 
+                fastestLap = 0
+
+            fastestLapTimeString = result.get('FastestLap', {}).get('Time', {}).get('time', '0:0.0')
+            fastestLapTime = convert_time_to_milliseconds(fastestLapTimeString)
+            fastestLapTime = str(fastestLapTime)
+
+            # TO DO 
+            fastestLapSpeed = 415.200
+            averageLapTime = 9000.04
+            pitStopDurationTotal = 28981
+
+            # checking duplicates 
+            check_query = sql.SQL("""
+                SELECT resultId FROM Fact_RaceResults
+                WHERE raceId = %s AND driverId = %s AND constructorId = %s AND circuitId = %s AND locationId = %s 
+                AND startPosition = %s AND endPosition = %s AND laps = %s;
+                """)
+            cursor.execute(check_query, (race_id, driver_id, constructor_id, circuit_id, location_id, startPosition, endPosition, laps))
+            existing_result = cursor.fetchone()
+
+            if existing_result is None: 
+                # finally, add the result
+                result_id = generate_id_from_string(f"{race_id}_{driver_id}_{constructor_id}_{startPosition}_{endPosition}", cursor, "fact_raceresults", "resultId")
+                print(f"Result ID: {result_id} (Type: {type(result_id).__name__})")
+                print(f"Race ID: {race_id} (Type: {type(race_id).__name__})")
+                print(f"Driver ID: {driver_id} (Type: {type(driver_id).__name__})")
+                print(f"Constructor ID: {constructor_id} (Type: {type(constructor_id).__name__})")
+                print(f"Location ID: {location_id} (Type: {type(location_id).__name__})")
+                print(f"Status ID: {status_id} (Type: {type(status_id).__name__})")
+                print(f"Start Position: {startPosition} (Type: {type(startPosition).__name__})")
+                print(f"End Position: {endPosition} (Type: {type(endPosition).__name__})")
+                print(f"Rank: {rank} (Type: {type(rank).__name__})")
+                print(f"Points: {points} (Type: {type(points).__name__})")
+                print(f"Laps: {laps} (Type: {type(laps).__name__})")
+                print(f"Duration: {duration} (Type: {type(duration).__name__})")
+                print(f"Fastest Lap: {fastestLap} (Type: {type(fastestLap).__name__})")
+                print(f"Fastest Lap Time: {fastestLapTime} (Type: {type(fastestLapTime).__name__})")
+                print(f"Fastest Lap Speed: {fastestLapSpeed} (Type: {type(fastestLapSpeed).__name__})")
+                print(f"Average Lap Time: {averageLapTime} (Type: {type(averageLapTime).__name__})")
+                print(f"Pit Stop Duration Total: {pitStopDurationTotal} (Type: {type(pitStopDurationTotal).__name__})")
+                print('')
+                insert_query = sql.SQL("""
+                INSERT INTO Fact_RaceResults (resultId, raceId, driverId, constructorId, circuitId, locationId, statusId, startPosition, endPosition, rank, points, laps, duration, fastestLap, fastestLapTime, fastestLapSpeed, averageLapTime, pitStopDurationTotal)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (resultId) DO NOTHING;
+            """)
+            
+                cursor.execute(insert_query, (
+                    result_id, race_id, driver_id, constructor_id, circuit_id, location_id, status_id, startPosition, endPosition, rank, points, 
+                    laps, duration, fastestLap, fastestLapTime, fastestLapSpeed, averageLapTime, pitStopDurationTotal
+                ))
+                print(f"Inserted new race result: ResultID={result_id}, DriverID={driver_id}, ConstructorID={constructor_id}, Start={startPosition}, End={endPosition}, Laps={laps}")
+            else:
+                print(f"Result already exists for DriverID={driver_id}, ConstructorID={constructor_id}, Start={startPosition}, End={endPosition}, Laps={laps}")
 
 # main function / connecting 
 def main():
@@ -983,10 +1049,12 @@ def main():
                 year = now.year
 
                 # fetch and insert race results
-                season, round, raceResults = fetch_race_results(year)
-                rr_race = fetch_race_info(season, round)
+                raceResults = fetch_race_results(year)
                 if raceResults:
-                    insert_race_results_into_db(raceResults, cursor, rr_race)
+                    for race in raceResults['races']:
+                        season = race['season']
+                        round = race['round']
+                        insert_race_results_into_db(race['results'], cursor, race)
 
                 conn.commit()
                 print("Database operations completed successfully.")
