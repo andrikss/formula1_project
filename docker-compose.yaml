@@ -1,0 +1,116 @@
+version: '2.2'
+services:
+
+  postgres:
+    image: postgres:13
+    restart: always
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=andrea1
+      - POSTGRES_DB=race_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - airflow-net
+    ports:
+      - 5433:5432
+
+  airflow-init:
+    image: apache/airflow:2.10.2
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://postgres:andrea1@postgres:5432/race_db
+      - AIRFLOW__WEBSERVER__SECRET_KEY=bdb918ce110e55475ad0a3e2d6d690f12e7e638a7e287394
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./data:/opt/airflow/data  
+      - airflow_logs:/airflow/logs
+      - ./scripts:/opt/airflow/scripts
+    networks:
+      - airflow-net
+    command: ["airflow", "db", "init"]
+
+  airflow-scheduler:
+    image: apache/airflow:2.10.2
+    restart: always
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://postgres:andrea1@postgres:5432/race_db
+      - AIRFLOW__WEBSERVER__WORKERS=4
+      - AIRFLOW__WEBSERVER__SECRET_KEY=bdb918ce110e55475ad0a3e2d6d690f12e7e638a7e287394
+      - AIRFLOW__WEBSERVER__BASE_URL=http://localhost:8081
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./data:/opt/airflow/data  
+      - airflow_logs:/airflow/logs
+      - ./scripts:/opt/airflow/scripts
+    networks:
+      - airflow-net
+    depends_on:
+      - airflow-webserver
+      - postgres
+    command: ["airflow", "scheduler"]
+
+  airflow-webserver:
+    image: apache/airflow:2.10.2
+    restart: always
+    ports:
+      - "8081:8080"
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://postgres:andrea1@postgres:5432/race_db
+      - AIRFLOW__WEBSERVER__SECRET_KEY=bdb918ce110e55475ad0a3e2d6d690f12e7e638a7e287394
+      - AIRFLOW__WEBSERVER__BASE_URL=http://localhost:8081
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./data:/opt/airflow/data  
+      - airflow_logs:/airflow/logs
+      - ./scripts:/opt/airflow/scripts
+    networks:
+      - airflow-net
+    depends_on:
+      - airflow-init
+      - postgres
+    command: ["airflow", "webserver"]
+
+  zookeeper:
+    image: wurstmeister/zookeeper:3.4.6
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+
+  kafka:
+    image: wurstmeister/kafka:latest
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_ADVERTISED_LISTENERS: INSIDE://kafka:9092,OUTSIDE://localhost:9092
+      KAFKA_LISTENERS: INSIDE://0.0.0.0:9092,OUTSIDE://0.0.0.0:9092
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'false' 
+    depends_on:
+      - zookeeper
+
+  pgadmin:
+    image: dpage/pgadmin4
+    restart: always
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "5050:80" 
+    networks:
+      - airflow-net
+    depends_on:
+      - postgres
+
+volumes:
+  airflow_logs:
+  postgres_data:
+    driver: local
+    
+networks:
+  airflow-net:
+    driver: bridge
