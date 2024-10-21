@@ -11,17 +11,12 @@ from datetime import datetime
 # generate id from string
 def generate_id_from_string(string_id, cursor, table_name, id_column):
 
-    # sql query for checking
-    check_id_query = sql.SQL(f"""
-        SELECT {id_column}
-        FROM {table_name}
-        WHERE {id_column} = %s
-    """)          
-
     # making unique id from string
     ascii_sum = sum(ord(char) for char in string_id)
     unique_id = abs(ascii_sum) % (10 ** 3)
-
+    
+    return unique_id
+    """
     # checking if that id exists
     cursor.execute(check_id_query, (unique_id,))
     existing_row = cursor.fetchone()
@@ -38,8 +33,8 @@ def generate_id_from_string(string_id, cursor, table_name, id_column):
     # try to make a new ID, that doesnt already exist, for 20 times, this is just borderline case
         print(f"Could not generate a unique  ID. Skipping.") 
         return None
+    """
 
-    return unique_id
 
 # generate unique id
 def generate_unique_id(string_id, attempts=0):
@@ -59,60 +54,28 @@ def fetch_driver_data():
         return []
 
 # drivers into db
-def insert_drivers_into_db(drivers, cursor):               
-                # sql queries
-                check_name_query = sql.SQL("""
-                    SELECT driverId, dob, nationality
-                    FROM DimensionDriver
-                    WHERE name = %s AND surname = %s
-                """)
+def transform_driver_data(drivers):        
 
-                insert_query = sql.SQL("""
-                    INSERT INTO DimensionDriver (driverId, name, surname, dob, nationality)
-                    VALUES (%s, %s, %s, %s, %s)
-                    ON CONFLICT (driverId) DO NOTHING;
-                """)
+    transformed_drivers = []
 
-                update_query = sql.SQL("""
-                    UPDATE DimensionDriver
-                    SET dob = %s, nationality = %s
-                    WHERE driverId = %s;
-                """)
+    for driver in drivers:
+        original_driver_id = driver['driverId'] 
+        name = driver['givenName']
+        surname = driver['familyName']
+        dob = datetime.strptime(driver['dateOfBirth'], '%Y-%m-%d').date() if 'dateOfBirth' in driver else None
+        nationality = driver['nationality']
 
-                for driver in drivers:
-                    original_driver_id = driver['driverId'] 
-                    name = driver['givenName']
-                    surname = driver['familyName']
-                    dob = datetime.strptime(driver['dateOfBirth'], '%Y-%m-%d').date() if 'dateOfBirth' in driver else None
-                    nationality = driver['nationality']
+        transformed_driver = {
+            'driverId': original_driver_id,
+            'name': name,
+            'surname': surname,
+            'dob': str(dob) if dob else None, 
+            'nationality': nationality
+        }
 
-                    # checking if name and surname already exist 
-                    cursor.execute(check_name_query, (name, surname))
-                    name_check = cursor.fetchone()
+        transformed_drivers.append(transformed_driver)
 
-                    if name_check:
-                        existing_dob, existing_nationality = name_check[1], name_check[2]
-
-                        # if row has the same name and surname, but different dob OR nat - update it
-                        # there can be drivers that have same name and surname
-                        # so - if this row has same name and surname, but different dob AND nationality - its probabaly a completely new driver.
-                    
-                        if (existing_dob != dob) or (existing_nationality != nationality):                            
-                            if (existing_dob != dob) and (existing_nationality != nationality):
-                                driver_id = generate_id_from_string(f"{name}_{surname}_{dob}_{nationality}", cursor, "dimensiondriver", "driverId")                               
-                                cursor.execute(insert_query, (driver_id, name, surname, dob, nationality))
-                                print(f"Inserted new driver with different DOB and nationality: {driver_id}, {name}, {surname}, {dob}, {nationality}.")
-                            else:
-                                cursor.execute(update_query, (dob, nationality, name_check[0]))
-                                print(f"Updated driver {name} {surname} with new DOB or nationality.")
-                        else:
-                            print(f"Driver {name} {surname} already exists with the same details. Skipping.")
-                    else:         
-                        driver_id = generate_id_from_string(f"{name}_{surname}_{dob}_{nationality}", cursor, "dimensiondriver", "driverId")              
-                        cursor.execute(insert_query, (driver_id, name, surname, dob, nationality))
-                        print(f"Inserted new driver: {driver_id}, {name}, {surname}, {dob}, {nationality}")
-
-                print("Database operations completed successfully.")
+    return transformed_drivers
 
 # fetch from constructor api
 def fetch_constructor_data():
@@ -996,73 +959,62 @@ def insert_race_results_into_db(race_results, cursor, race):
             else:
                 print(f"Result already exists for DriverID={driver_id}, ConstructorID={constructor_id}, Start={startPosition}, End={endPosition}, Laps={laps}")
 
-# main function / connecting 
+
+
+# main function
 def main():
-    try:
-        with psycopg2.connect(
-            dbname=os.getenv('DB_NAME', 'race_db'),
-            user=os.getenv('DB_USER', 'postgres'),
-            password=os.getenv('DB_PASSWORD', 'andrea1'),
-            host=os.getenv('DB_HOST', 'postgres'),
-            port=os.getenv('DB_PORT', '5432')
-        ) as conn:
-            with conn.cursor() as cursor:
-                # fetch drivers and insert them
-                drivers = fetch_driver_data()
-                if drivers:
-                    insert_drivers_into_db(drivers, cursor)
 
-                # fetch and insert constructors
-                constructors = fetch_constructor_data()
-                if constructors: 
-                    insert_constructors_into_db(constructors, cursor) 
+    # fetch drivers and transform them
+    drivers = fetch_driver_data()
+    if drivers:
+        drivers_df = transform_driver_data(drivers)
 
-                # fetch and insert circuits 
-                circuits = fetch_circuit_data()
-                if circuits:
-                    insert_circuits_into_db(circuits, cursor)
 
-                # fetch and insert races
-                races = fetch_races_data()
-                if races:
-                    insert_races_into_db(races, cursor)
+    """"
+    # fetch and insert constructors
+    constructors = fetch_constructor_data()
+    if constructors: 
+        insert_constructors_into_db(constructors, cursor) 
 
-                # fetch and insert locations
-                locations = fetch_locations_data()
-                if locations: 
-                    insert_location_into_db(locations, cursor)
+    # fetch and insert circuits 
+    circuits = fetch_circuit_data()
+    if circuits:
+        insert_circuits_into_db(circuits, cursor)
 
-                # fetch and insert driver standings 
-                season, round, driverStandings = fetch_driver_standings_data()
-                ds_race = fetch_race_info(season, round)
-                if driverStandings:
-                    insert_driver_standings_into_db(driverStandings, cursor, ds_race)
+    # fetch and insert races
+    races = fetch_races_data()
+    if races:
+        insert_races_into_db(races, cursor)
 
-                # fetch and insert constructor standings 
-                season, round, constructorStandings = fetch_constructor_standings_data()
-                cs_race = fetch_race_info(season, round)
-                if constructorStandings:
-                    insert_constructor_standings_into_db(constructorStandings, cursor, cs_race)
+    # fetch and insert locations
+    locations = fetch_locations_data()
+    if locations: 
+        insert_location_into_db(locations, cursor)
 
-                # we want to fetch results from this year
-                now = datetime.now()
-                year = now.year
+    # fetch and insert driver standings 
+    season, round, driverStandings = fetch_driver_standings_data()
+    ds_race = fetch_race_info(season, round)
+    if driverStandings:
+        insert_driver_standings_into_db(driverStandings, cursor, ds_race)
 
-                # fetch and insert race results
-                raceResults = fetch_race_results(year)
-                if raceResults:
-                    for race in raceResults['races']:
-                        season = race['season']
-                        round = race['round']
-                        insert_race_results_into_db(race['results'], cursor, race)
+    # fetch and insert constructor standings 
+    season, round, constructorStandings = fetch_constructor_standings_data()
+    cs_race = fetch_race_info(season, round)
+    if constructorStandings:
+        insert_constructor_standings_into_db(constructorStandings, cursor, cs_race)
 
-                conn.commit()
-                print("Database operations completed successfully.")
+    # we want to fetch results from this year
+    now = datetime.now()
+    year = now.year
 
-    except psycopg2.Error as e:
-        print("Database error:", e)
-    except Exception as e:
-        print("Unexpected error:", e)
+    # fetch and insert race results
+    raceResults = fetch_race_results(year)
+    if raceResults:
+        for race in raceResults['races']:
+            season = race['season']
+            round = race['round']
+            insert_race_results_into_db(race['results'], cursor, race)
+    """
 
 # entry point
 if __name__ == '__main__':

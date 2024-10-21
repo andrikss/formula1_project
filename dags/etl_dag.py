@@ -3,6 +3,9 @@ import logging
 import pandas as pd
 import numpy as np
 import pendulum
+from kafka import KafkaConsumer
+import logging
+import json
 from airflow.decorators import dag, task
 from psycopg2.extras import execute_values
 from psycopg2.extensions import register_adapter, AsIs
@@ -15,7 +18,7 @@ def adapt_numpy_int64(n):
 register_adapter(np.int64, adapt_numpy_int64)
 
 @dag(
-    schedule=None,
+    schedule='0 * * * *',
     start_date=pendulum.datetime(2021, 1, 1, tz="UTC"),
     catchup=False,
 )
@@ -43,6 +46,36 @@ def taskflow_etl():
         finally:
             cursor.close()
             conn.close()
+
+    # CONSUMER 
+    @task
+    def consume_from_kafka():
+        consumer = KafkaConsumer(
+            'drivers_topic',
+            bootstrap_servers='kafka-broker-1:9092',
+            value_deserializer=lambda x: json.loads(x.decode('utf-8')),
+            consumer_timeout_ms=10000  
+        )
+        logging.info("Kafka Consumer started.")
+
+        try:
+            messages_consumed = 0
+            max_messages = 100 
+            for message in consumer:
+                logging.info(f"Consumed message: {message.value}")
+                # Obrada poruke
+                messages_consumed += 1
+                if messages_consumed >= max_messages:
+                    logging.info("Reached maximum number of messages to consume.")
+                    break
+            else:
+                logging.info("No more messages to consume.")
+        except Exception as e:
+            logging.error(f"An error occurred in Kafka consumer: {e}")
+        finally:
+            consumer.close()
+            logging.info("Kafka Consumer closed.")
+
 
     # EXTRACT
     @task()
@@ -433,6 +466,8 @@ def taskflow_etl():
 
     data_frame = extract()
 
+    consume_task = consume_from_kafka()
+
     driver_df = transform_driver(data_frame)
     constructor_df = transform_constructor(data_frame)
     circuit_df = transform_circuit(data_frame)
@@ -457,8 +492,10 @@ def taskflow_etl():
         race_results_df,
     )
 
+    
+
     # dependencies between tasks
-    db_reset >> data_frame >> [
+    db_reset >> data_frame >> consume_task >> [
         driver_df,
         constructor_df,
         circuit_df,
