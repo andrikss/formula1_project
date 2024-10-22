@@ -23,7 +23,7 @@ register_adapter(np.int64, adapt_numpy_int64)
     catchup=False,
 )
 
-def taskflow_etl():
+def etl_dag():
 
     # RESTART THE DB 
     @task()
@@ -466,7 +466,7 @@ def taskflow_etl():
 
     data_frame = extract()
 
-    consume_task = consume_from_kafka()
+    # consume_task = consume_from_kafka()
 
     driver_df = transform_driver(data_frame)
     constructor_df = transform_constructor(data_frame)
@@ -493,9 +493,8 @@ def taskflow_etl():
     )
 
     
-
     # dependencies between tasks
-    db_reset >> data_frame >> consume_task >> [
+    db_reset >> data_frame >> [
         driver_df,
         constructor_df,
         circuit_df,
@@ -509,4 +508,4 @@ def taskflow_etl():
     ] >> load_data_task
 
 
-dag_instance = taskflow_etl()
+dag_instance = etl_dag()

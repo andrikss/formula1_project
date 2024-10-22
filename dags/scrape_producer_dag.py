@@ -9,7 +9,7 @@ import logging
 import sys
 sys.path.append('/opt/airflow/scripts')
 
-from scraping_data import fetch_driver_data, transform_driver_data
+from fetch_data import fetch_driver_data
 
 
 default_args = {
@@ -24,6 +24,7 @@ def main():
     try:
         bootstrap_servers = 'kafka-broker-1:9092'
         logging.info(f'Connecting to Kafka at {bootstrap_servers}')
+        print(f'Connecting to Kafka at {bootstrap_servers}') 
 
         producer = KafkaProducer(
             bootstrap_servers=bootstrap_servers,
@@ -31,12 +32,21 @@ def main():
         )
 
         drivers = fetch_driver_data()  
-        if drivers:
-            drivers_df = transform_driver_data(drivers)
-            send_dataframe_to_kafka(drivers_df, 'drivers_topic', producer)
+        logging.info(f'Driver data fetched: {drivers}')
+        print(f'Driver data fetched: {drivers}')  
 
-        else:       
+        if drivers:
+            drivers_df = pd.DataFrame(drivers) 
+            send_dataframe_to_kafka(drivers_df, 'drivers_topic', producer)
+        else:
             logging.warning('No driver data fetched.')
+
+        # telling listener there is new messages
+        trigger_message = {"trigger_scraping": True}
+        producer.send('trigger_topic', trigger_message)
+
+        logging.info(f"Sent trigger message to 'trigger_topic': {trigger_message}")
+        print(f"Sent trigger message to 'trigger_topic': {trigger_message}")
 
     except Exception as e:
         logging.error(f'Error occurred: {e}')
@@ -45,10 +55,16 @@ def main():
         if producer:
             producer.close() 
 
+
 def send_dataframe_to_kafka(dataframe, topic_name, producer):
-    for _, row in dataframe.iterrows():
+    logging.info(f'Sending data to Kafka topic: {topic_name}')
+    print(f'Sending data to Kafka topic: {topic_name}')  
+    
+    for _, row in dataframe.iterrows():  
         producer.send(topic_name, row.to_dict())
         logging.info(f"Sent data to Kafka topic {topic_name}: {row.to_dict()}")
+        print(f"Sent data to Kafka topic {topic_name}: {row.to_dict()}")  
+
 
 with DAG(
     'scraping_and_producer_dag',
