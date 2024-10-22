@@ -47,40 +47,10 @@ def etl_dag():
             cursor.close()
             conn.close()
 
-    # CONSUMER 
-    @task
-    def consume_from_kafka():
-        consumer = KafkaConsumer(
-            'drivers_topic',
-            bootstrap_servers='kafka-broker-1:9092',
-            value_deserializer=lambda x: json.loads(x.decode('utf-8')),
-            consumer_timeout_ms=10000  
-        )
-        logging.info("Kafka Consumer started.")
-
-        try:
-            messages_consumed = 0
-            max_messages = 100 
-            for message in consumer:
-                logging.info(f"Consumed message: {message.value}")
-                # Obrada poruke
-                messages_consumed += 1
-                if messages_consumed >= max_messages:
-                    logging.info("Reached maximum number of messages to consume.")
-                    break
-            else:
-                logging.info("No more messages to consume.")
-        except Exception as e:
-            logging.error(f"An error occurred in Kafka consumer: {e}")
-        finally:
-            consumer.close()
-            logging.info("Kafka Consumer closed.")
-
-
     # EXTRACT
     @task()
     def extract():
-        df = pd.read_csv('./data/dataEngineeringDataset.csv', low_memory=False) # 4 now
+        df = pd.read_csv('./data/dataEngineeringDataset.csv', low_memory=False) 
         return df
     
     # DRIVER
@@ -157,6 +127,7 @@ def etl_dag():
             'points_driverstandings': 'points',
             'position_driverstandings': 'position',
             })
+        df_driver_standing['points'] = pd.to_numeric(df_driver_standing['points'], errors='coerce')
         df_driver_standing_cleaned = df_driver_standing.drop_duplicates()
         return df_driver_standing_cleaned
 
@@ -170,6 +141,7 @@ def etl_dag():
             'position_constructorstandings': 'position',
             'wins_constructorstandings': 'wins'
         })
+        df_constructor_standing['points'] = pd.to_numeric(df_constructor_standing['points'], errors='coerce')
         df_constructor_standing_cleaned = df_constructor_standing.drop_duplicates()
         return df_constructor_standing_cleaned
 
@@ -231,7 +203,8 @@ def etl_dag():
         # assuring that endPosition is a string bc of D N E and R possibilities 
         df_race_results['endPosition'] = df_race_results['endPosition'].astype(str)
 
-        df_race_results['points'] = df_race_results['points'].astype(str).str.replace('.', '').astype(int)
+        df_race_results['points'] = pd.to_numeric(df_race_results['points'], errors='coerce')
+        df_race_results['points'].fillna(0, inplace=True)
         df_race_results['laps'] = df_race_results['laps'].astype(int)
 
         df_race_results.dropna(subset=['duration', 'fastestLap', 'fastestLapTime', 'fastestLapSpeed'], inplace=True)
@@ -248,7 +221,7 @@ def etl_dag():
             total_milliseconds = total_seconds * 1000 
             return total_milliseconds
 
-        # conersion to milliseconds
+        # conversion to milliseconds
         df_race_results['fastestLapTime'] = df_race_results['fastestLapTime'].apply(convert_time_to_milliseconds)
 
         df_race_results['fastestLapSpeed'] = df_race_results['fastestLapSpeed'].astype(str).str.replace("'", "").astype(float)
@@ -465,8 +438,6 @@ def etl_dag():
     db_reset = restart_db()
 
     data_frame = extract()
-
-    # consume_task = consume_from_kafka()
 
     driver_df = transform_driver(data_frame)
     constructor_df = transform_constructor(data_frame)
