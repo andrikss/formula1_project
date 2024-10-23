@@ -40,46 +40,9 @@ def fetch_circuit_data():
         print("Error fetching circuit data from API")
         return []
 
-# fetch altitude with lat and long
-def fetch_altitude(lat, long):
-    url = f"https://api.open-elevation.com/api/v1/lookup?locations={lat},{long}"
-    response = requests.get(url)
-    if response.status_code == 200:
-        data = response.json()
-        if data and 'results' in data:
-            return data['results'][0]['elevation']
-    return None
 
-# get race info for sessions 
-def fetch_race_info_for_sessions(season, round):
-    url = f"http://ergast.com/api/f1/{season}/{round}.json"
-    response = requests.get(url)
-
-    if response.status_code == 200:
-        data = response.json()
-        race_info = data['MRData']['RaceTable']['Races'][0]
-
-        sessions_info = {
-            'raceName': race_info['raceName'],
-            'round': race_info['round'],
-            'date': race_info['date'],
-            'time': race_info.get('time'),
-            'fp1_date': race_info.get('FirstPractice', {}).get('date'),  
-            'fp1_time': race_info.get('FirstPractice', {}).get('time'),
-            'fp2_date': race_info.get('SecondPractice', {}).get('date'),
-            'fp2_time': race_info.get('SecondPractice', {}).get('time'),
-            'fp3_date': race_info.get('ThirdPractice', {}).get('date'),
-            'fp3_time': race_info.get('ThirdPractice', {}).get('time'),
-            'quali_date': race_info.get('Qualifying', {}).get('date'),
-            'quali_time': race_info.get('Qualifying', {}).get('time'),
-        }
-        return sessions_info
-    else:
-        print("Error fetching race data from Ergast API:", response.status_code)
-        return None
-    
 # fetch races from api
-def fetch_races_data():
+def fetch_race_data():
     url = "http://ergast.com/api/f1/races.json"
     response = requests.get(url)
 
@@ -91,7 +54,7 @@ def fetch_races_data():
         return []
     
 # fetch location data
-def fetch_locations_data():
+def fetch_location_data():
     url = "http://ergast.com/api/f1/races.json"
     response = requests.get(url)
     

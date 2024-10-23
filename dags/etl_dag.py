@@ -18,9 +18,10 @@ def adapt_numpy_int64(n):
 register_adapter(np.int64, adapt_numpy_int64)
 
 @dag(
-    schedule='0 * * * *',
-    start_date=pendulum.datetime(2021, 1, 1, tz="UTC"),
+    schedule='0 1 * * *', 
+    start_date=pendulum.datetime(2023, 1, 1, tz="UTC"),
     catchup=False,
+    max_active_tasks=10
 )
 
 def etl_dag():

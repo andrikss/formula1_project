@@ -87,3 +87,9 @@ CREATE TABLE IF NOT EXISTS DimensionSession (
     sessionDate DATE,
     sessionTime TIME
 );
+
+CREATE TABLE StagingDrivers (
+    driverId VARCHAR(255) PRIMARY KEY,
+    sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+

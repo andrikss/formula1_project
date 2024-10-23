@@ -9,7 +9,7 @@ import logging
 import sys
 sys.path.append('/opt/airflow/scripts')
 
-from fetch_data import fetch_driver_data
+from fetch_data import fetch_driver_data, fetch_constructor_data, fetch_circuit_data, fetch_race_data, fetch_location_data
 
 
 default_args = {
@@ -24,16 +24,15 @@ def main():
     try:
         bootstrap_servers = 'kafka-broker-1:9092'
         logging.info(f'Connecting to Kafka at {bootstrap_servers}')
-        print(f'Connecting to Kafka at {bootstrap_servers}') 
 
         producer = KafkaProducer(
             bootstrap_servers=bootstrap_servers,
             value_serializer=lambda v: json.dumps(v).encode('utf-8')
         )
 
+        # fetch drivers data 
         drivers = fetch_driver_data()  
         logging.info(f'Driver data fetched: {drivers}')
-        print(f'Driver data fetched: {drivers}')  
 
         if drivers:
             drivers_df = pd.DataFrame(drivers) 
@@ -41,12 +40,50 @@ def main():
         else:
             logging.warning('No driver data fetched.')
 
+        # fetch constructors data
+        constructors = fetch_constructor_data()  
+        logging.info(f'Constructor data fetched: {constructors}')
+
+        if constructors:
+            constructors_df = pd.DataFrame(constructors) 
+            send_dataframe_to_kafka(constructors_df, 'constructors_topic', producer)
+        else:
+            logging.warning('No constructor data fetched.')
+
+        # fetch circuit data 
+        circuits = fetch_circuit_data()  
+        logging.info(f'Circuit data fetched: {circuits}')
+
+        if circuits:
+            circuits_df = pd.DataFrame(circuits) 
+            send_dataframe_to_kafka(circuits_df, 'circuit_topic', producer)  
+        else:
+            logging.warning('No circuit data fetched.')
+
+        # fetch race data 
+        races = fetch_race_data()  
+        logging.info(f'Race data fetched: {races}')
+
+        if races:
+            races_df = pd.DataFrame(races)
+            send_dataframe_to_kafka(races_df, 'race_topic', producer) 
+        else:
+            logging.warning('No race data fetched.')
+
+        # fetch location data
+        locations = fetch_location_data()
+        logging.info(f'Location data fetched: {locations}')
+
+        if locations:
+            locations_df = pd.DataFrame(locations)
+            send_dataframe_to_kafka(locations_df, 'location_topic', producer)  
+        else:
+            logging.warning('No location data fetched.')
+
         # telling listener there is new messages
         trigger_message = {"trigger_scraping": True}
         producer.send('trigger_topic', trigger_message)
-
         logging.info(f"Sent trigger message to 'trigger_topic': {trigger_message}")
-        print(f"Sent trigger message to 'trigger_topic': {trigger_message}")
 
     except Exception as e:
         logging.error(f'Error occurred: {e}')
@@ -75,7 +112,7 @@ with DAG(
 ) as dag:
 
     fetch_and_send_task = PythonOperator(
-        task_id='fetch_and_send_drivers',
+        task_id='fetch_and_send',
         python_callable=main
     )
 
