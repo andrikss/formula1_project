@@ -234,6 +234,7 @@ def fetch_race_info_for_sessions(season, round):
         print("Error fetching race data from Ergast API:", response.status_code)
         return None
 
+# transform insert session
 def transform_insert_sessions(race_info, race_id, cursor):
     sessions = [
         {'type': 'fp1', 'date': race_info['fp1_date'], 'time': race_info['fp1_time']},
@@ -346,3 +347,473 @@ def transform_insert_locations(locations, cursor):
             )
             print(f"Inserted location: ID={location_id}, Country={country}, Location={locality}")
 
+# query for finding id
+def get_race_id(cursor, race_name, race_date, round):
+    cursor.execute(
+        """
+        SELECT raceId
+        FROM DimensionRace
+        WHERE name = %s AND date = %s AND round = %s;
+        """,
+        (race_name, race_date, round)
+    )
+    result = cursor.fetchone()
+    return result[0] if result else None  
+
+# query for finding id
+def get_driver_id(cursor, given_name, family_name, date_of_birth, nationality):
+    cursor.execute(
+        """
+        SELECT driverId
+        FROM DimensionDriver
+        WHERE name = %s AND surname = %s AND dob = %s AND nationality = %s;
+        """,
+        (given_name, family_name, date_of_birth, nationality)
+    )
+    result = cursor.fetchone()
+    return result[0] if result else None
+
+# update race time? check this, probs can opt 
+def update_race_time(cursor, race_id, race_time):
+    cursor.execute(
+        """
+        UPDATE DimensionRace
+        SET time = %s
+        WHERE raceId = %s;
+        """,
+        (race_time, race_id)
+    )
+    print(f"Updated race time for RaceID={race_id} to {race_time}")
+
+# get race info
+def get_race_info(season, round):
+    url = f"http://ergast.com/api/f1/{season}/{round}.json"
+    response = requests.get(url)
+
+    if response.status_code == 200:
+        data = response.json()
+        race_info = data['MRData']['RaceTable']['Races'][0]
+
+        circuit_info = race_info['Circuit']
+
+        return {
+            'raceName': race_info['raceName'],
+            'round' : race_info['round'],
+            'season' : race_info['season'],
+            'date': race_info['date'],
+            'time' : race_info['time'],
+            'circuit': {
+                'circuitName': circuit_info['circuitName'],
+                'lat': circuit_info['Location']['lat'],
+                'long': circuit_info['Location']['long'],
+                'locality': circuit_info['Location']['locality'],
+                'country': circuit_info['Location']['country']
+              }
+        }
+    else:
+        print("Error fetching race data from Ergast API:", response.status_code)
+        return None 
+
+# insert driver standings into db
+def transform_insert_driver_standings(driver_standings, cursor, race):
+
+    race_id = get_race_id(cursor, race['raceName'], race['date'], race['round'])
+
+    if race_id is None:
+        race_id = generate_id_from_string(f"{race['raceName']}", cursor, "dimensionrace", "raceId")  
+        insert_race_query = sql.SQL(""" 
+            INSERT INTO DimensionRace (raceId, name, round, time, date)
+            VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (raceId) DO NOTHING;
+        """)
+
+        # first we insert new race
+        cursor.execute(insert_race_query, (race_id, race['raceName'], race['round'], race['time'],  race['date']))
+        print(f"Inserted new race: RaceID={race_id}, RaceName={race['raceName']}, Round={race['round']}, Date={race['date']}, Time={race['time']}")
+
+        # then we insert sessions for that race
+        race_info = fetch_race_info_for_sessions(race['season'], race['round'])
+        transform_insert_sessions(race_info, race_id, cursor)
+
+        cursor.connection.commit()
+    else:           
+        update_race_time(cursor, race_id, race['time'])
+
+    for standing in driver_standings:
+
+        points = float(standing['points'])  
+        position = int(standing['positionText']) 
+        wins = int(standing['wins'])  
+
+        driver = standing['Driver']  
+        given_name = driver['givenName']
+        family_name = driver['familyName']
+        date_of_birth = datetime.strptime(driver['dateOfBirth'], '%Y-%m-%d').date()
+        nationality = driver['nationality']
+
+        # find driver id 
+        driver_id = get_driver_id(cursor, given_name, family_name, date_of_birth, nationality)
+
+        # if it is None - insert it into dimensionDriver 
+        if driver_id is None:
+            driver_id = generate_id_from_string(f"{given_name}_{family_name}", cursor, "dimensiondriver", "driverId")
+            insert_driver_query = sql.SQL("""
+                INSERT INTO DimensionDriver (driverId, name, surname, dob, nationality)
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (driverId) DO NOTHING;
+            """)
+            cursor.execute(insert_driver_query, (driver_id, given_name, family_name, date_of_birth, nationality))
+            print(f"Inserted new driver: DriverID={driver_id}, GivenName={given_name}, FamilyName={family_name}, DateOfBirth={date_of_birth}, Nationality={nationality}")
+
+        # check duplicates 
+        cursor.execute(
+            """
+            SELECT driverStandingId
+            FROM fact_DriverStanding
+            WHERE raceId = %s AND driverId = %s AND position = %s AND points = %s AND wins = %s;
+            """,
+            (race_id, driver_id, position, points, wins)
+        )
+
+        existing_count = cursor.fetchone()
+
+        if existing_count:
+            print(f"Duplicate entry found for RaceID={race_id}, DriverID={driver_id}, Position={position}, Points={points}, Wins={wins}, skipping.")
+        else:
+            driver_standing_id = generate_id_from_string(f"{driver['givenName']}_{driver['familyName']}", cursor, "fact_driverstanding", "driverStandingId")
+            cursor.execute(
+                """
+                INSERT INTO fact_DriverStanding (driverStandingId, raceId, driverId, points, position, wins)
+                VALUES (%s, %s, %s, %s, %s, %s);
+                """,
+                (driver_standing_id, race_id, driver_id, points, position, wins)
+            )
+            print(f"Inserted driver standing: DriverStandingID={driver_standing_id}, RaceID={race_id}, DriverID={driver_id}, Position={position}, Points={points}, Wins={wins}")
+
+# get constructor id by name and nationality
+def get_constructor_id(cursor, constructor_name, nationality):
+    cursor.execute(
+        """
+        SELECT constructorId
+        FROM DimensionConstructor
+        WHERE name = %s AND nationality = %s;
+        """,
+        (constructor_name, nationality)
+    )
+    result = cursor.fetchone()
+    return result[0] if result else None
+
+# transform insert constructor standings # insert constructor standings 
+def transfrom_insert_constructor_standings(constructor_standings, cursor, race):
+
+    race_id = get_race_id(cursor, race['raceName'], race['date'], race['round'])
+
+    if race_id is None:
+        race_id = generate_id_from_string(f"{race['raceName']}", cursor, "dimensionrace", "raceId")  
+        insert_race_query = sql.SQL(""" 
+            INSERT INTO DimensionRace (raceId, name, round, time, date)
+            VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (raceId) DO NOTHING;
+        """)
+        # inserting new race
+        cursor.execute(insert_race_query, (race_id, race['raceName'], race['round'], race['time'], race['date']))
+        print(f"Inserted new race: RaceID={race_id}, RaceName={race['raceName']}, Round={race['round']}, Date={race['date']}, Time={race['time']}")
+        
+         # then we insert sessions for that race
+        race_info = fetch_race_info_for_sessions(race['season'], race['round'])
+        transform_insert_sessions(race_info, race_id, cursor)
+
+        cursor.connection.commit()
+    else:           
+        update_race_time(cursor, race_id, race['time'])
+
+    for standing in constructor_standings:
+        points = float(standing['points'])  
+        position = int(standing['positionText'])  
+        wins = int(standing['wins'])
+        
+        constructor = standing['Constructor']  
+        constructor_name = constructor['name']
+        constructor_nationality = constructor['nationality']
+        constructor_id = constructor['constructorId']
+       
+        
+        constructor_id = get_constructor_id(cursor, constructor_name, constructor_nationality)
+
+        if constructor_id is None:
+            # if there is no constructor insert it into dim table (ric)
+            constructor_id = generate_id_from_string(f"{constructor_name}_{constructor_nationality}", cursor, "dimensiondriver", "driverId")
+            insert_constructor_query = sql.SQL(""" 
+                INSERT INTO DimensionConstructor (constructorId, name, nationality)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (constructorId) DO NOTHING;
+            """)
+            cursor.execute(insert_constructor_query, (constructor_id, constructor_name, constructor_nationality))
+            print(f"Inserted new constructor: ConstructorID={constructor_id}, Name={constructor_name}, Nationality={constructor_nationality}")
+
+        # Check for duplicates in fact_ConstructorStanding
+        cursor.execute(
+            """
+            SELECT constructorStandingId
+            FROM fact_ConstructorStanding
+            WHERE raceId = %s AND constructorId = %s AND position = %s AND points = %s AND wins = %s;
+            """,
+            (race_id, constructor_id, position, points, wins)
+        )
+
+        existing_count = cursor.fetchone()
+
+        if existing_count:
+            print(f"Duplicate entry found for RaceID={race_id}, ConstructorID={constructor_id}, Position={position}, Points={points}, skipping.")
+        else:
+            constructor_standing_id = generate_id_from_string(f"{constructor_name}", cursor, "fact_constructorstanding", "constructorStandingId")
+            cursor.execute(
+                """
+                INSERT INTO fact_ConstructorStanding (constructorStandingId, raceId, constructorId, points, position, wins)
+                VALUES (%s, %s, %s, %s, %s, %s);
+                """,
+                (constructor_standing_id, race_id, constructor_id, points, position, wins)
+            )
+            print(f"Inserted constructor standing: ConstructorStandingID={constructor_standing_id}, RaceID={race_id}, ConstructorID={constructor_id}, Position={position}, Points={points}")
+
+# get circuit id 
+def get_circuit_id(cursor, circuit_name, lat, lng):
+    query = sql.SQL("""
+        SELECT circuitId 
+        FROM DimensionCircuit
+        WHERE name = %s AND lat = %s AND lng = %s;
+    """)
+    
+    cursor.execute(query, (circuit_name, lat, lng))
+    
+    result = cursor.fetchone()
+    
+    if result:
+        return result[0]  
+    else:
+        return None
+
+# get location id 
+def get_location_id(cursor, locality, country):
+    query = sql.SQL("""
+        SELECT locationId 
+        FROM DimensionLocation
+        WHERE location = %s AND country = %s;
+    """)
+
+    cursor.execute(query, (locality, country))
+
+    result = cursor.fetchone()
+
+    if result:
+        return result[0] 
+    else:
+        return None
+
+# get status id 
+def get_status_id(cursor, status_name):
+    query = sql.SQL("""
+        SELECT statusId 
+        FROM DimensionStatus
+        WHERE status = %s;
+    """)
+
+    cursor.execute(query, (status_name,))
+
+    result = cursor.fetchone()
+
+    if result:
+        return result[0] 
+    else:
+        return None
+    
+# time conversion 
+def convert_time_to_milliseconds(time_string):
+    milliseconds = 0
+
+    # Split the time string into minutes and seconds
+    time_parts = time_string.split(':')
+    
+    # Check if the time string is in the format "MM:SS.sss"
+    if len(time_parts) == 2:  # MM:SS.sss
+        minutes = int(time_parts[0])  # Get the minutes
+        seconds_millis = time_parts[1]  # Get the seconds and milliseconds
+    else:
+        # If there's no minutes part, it's in the format "SS.sss"
+        minutes = 0
+        seconds_millis = time_parts[0]
+
+    # Further split seconds and milliseconds
+    seconds_parts = seconds_millis.split('.')
+    seconds = int(seconds_parts[0])  # Get the seconds
+
+    # Check if milliseconds exist
+    if len(seconds_parts) > 1:
+        millis = int(seconds_parts[1])  # Get the milliseconds
+    else:
+        millis = 0  # Default to 0 if not provided
+
+    # Calculate total milliseconds
+    milliseconds = (minutes * 60 * 1000) + (seconds * 1000) + millis
+
+    return milliseconds
+
+# transfomr and insert race results
+def transform_insert_race_results(race_results, cursor, race):
+
+    # does the race exist ? if it doesnt insert new one into race dim table
+    race_id = get_race_id(cursor, race['raceName'], race['date'], race['round'])
+
+    if race_id is None:
+        race_id = generate_id_from_string(f"{race['raceName']}", cursor, "dimensionrace", "raceId")  
+
+        insert_race_query = sql.SQL(""" 
+            INSERT INTO DimensionRace (raceId, name, round, time, date)
+            VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (raceId) DO NOTHING;
+        """)
+
+        # inserting new race
+        cursor.execute(insert_race_query, (race_id, race['raceName'], race['round'], race['time'], race['date']))
+        print(f"Inserted new race: RaceID={race_id}, RaceName={race['raceName']}, Round={race['round']}, Date={race['date']}, Time={race['time']}")
+        
+         # then we insert sessions for that race
+        race_info = fetch_race_info_for_sessions(race['season'], race['round'])
+        transform_insert_sessions(race_info, race_id, cursor)
+
+        cursor.connection.commit()
+    else:           
+        update_race_time(cursor, race_id, race['time'])
+
+    # then circuit
+    circuit_info = race['circuit']
+    circuit_id = get_circuit_id(cursor, circuit_info['circuitName'], circuit_info['location']['lat'], circuit_info['location']['long'])
+
+    if circuit_id is None: 
+        circuit_id = generate_id_from_string(f"{circuit_info['circuitName']}", cursor, 'dimensionCircuit', 'circuitId')
+        
+        insert_circuit_query = sql.SQL("""
+        INSERT INTO DimensionCircuit (circuitId, name, lat, lng, alt)
+        VALUES (%s, %s, %s, %s, %s)
+        ON CONFLICT (circuitId) DO NOTHING;
+    """)
+        
+        cursor.execute(insert_circuit_query, (circuit_id, circuit_info['circuitName'], circuit_info['location']['lat'], circuit_info['location']['lng'], None))
+
+    # then location
+    location_id = get_location_id(cursor, circuit_info['location']['locality'], circuit_info['location']['country'])
+    if location_id is None:
+        location_id =  get_next_location_id(cursor)
+        cursor.execute(
+                """
+                INSERT INTO DimensionLocation (locationId, location, country)
+                VALUES (%s, %s, %s);
+                """,
+                (location_id, circuit_info['locality'], circuit_info['country'])
+            )
+    
+    print('iznad fora sam')
+    for result in race_results:
+            # DRIVER 
+            driver_info = result['driver']
+            driver_id = get_driver_id(cursor, driver_info['givenName'], driver_info['familyName'], driver_info['dateOfBirth'], driver_info['nationality'])
+
+            if driver_id is None: 
+                driver_id = generate_id_from_string(f"{driver_info['givenName']}_{driver_info['familyName']}", cursor, "dimensiondriver", "driverId")
+                insert_driver_query = sql.SQL("""
+                    INSERT INTO DimensionDriver (driverId, name, surname, dob, nationality)
+                    VALUES (%s, %s, %s, %s, %s)
+                    ON CONFLICT (driverId) DO NOTHING;
+                """)
+                cursor.execute(insert_driver_query, (driver_id,  driver_info['givenName'], driver_info['familyName'], driver_info['dateOfBirth'], driver_info['nationality']))
+                print(f"Inserted new driver: DriverID={driver_id}, GivenName={driver_info['givenName']}, FamilyName={driver_info['familyName']}, DateOfBirth={driver_info['dateOfBirth']}, Nationality={driver_info['nationality']}")
+
+            # CONSTRUCTOR
+            constructor_info = result['constructor']
+            constructor_id = get_constructor_id(cursor, constructor_info['name'], constructor_info['nationality'])
+
+            if constructor_id is None: 
+                constructor_id = generate_id_from_string(f"{constructor_info['name']}_{constructor_info['nationality']}", cursor, "dimensiondriver", "driverId")
+                insert_constructor_query = sql.SQL(""" 
+                    INSERT INTO DimensionConstructor (constructorId, name, nationality)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (constructorId) DO NOTHING;
+                """)
+                cursor.execute(insert_constructor_query, (constructor_id, constructor_info['name'], constructor_info['nationality']))
+                print(f"Inserted new constructor: ConstructorID={constructor_id}, Name={constructor_info['name']}, Nationality={constructor_info['nationality']}")
+
+        
+            # STATUS 
+            status_id = get_status_id(cursor, result['status'])
+            if status_id is None:
+                status_id = generate_id_from_string(result['status'], cursor, "dimensionStatus", "statusId")
+
+                insert_status_query = sql.SQL("""
+                    INSERT INTO DimensionStatus (statusId, status)
+                    VALUES (%s, %s)
+                    ON CONFLICT (statusId) DO NOTHING;
+                """)
+
+                cursor.execute(insert_status_query, (status_id, result['status']))
+                print(f"Inserted new status: StatusID={status_id}, Name={result['status']}")
+
+            startPosition = int(result['grid'])
+            endPosition = int(result['positionText'])
+            rank = startPosition - endPosition
+            rank = int(rank)
+
+            # because end position is string in our DB becuase of 'D N E R' 
+            endPosition = str(result['positionText'])
+            points = float(result['points'])
+            laps = int(result['laps'])
+
+
+            # hard coding 
+            # will think about this later
+            duration = result.get('Time', {}).get('millis', None)
+            if duration is not None:
+                duration = convert_time_to_milliseconds(duration)
+                duration = int(duration)
+            else:
+                duration = 0
+
+            fastestLap = result.get('FastestLap', {}).get('lap', None)
+            if fastestLap is not None:
+                fastestLap = int(fastestLap)
+            else: 
+                fastestLap = 0
+
+            fastestLapTimeString = result.get('FastestLap', {}).get('Time', {}).get('time', '0:0.0')
+            fastestLapTime = convert_time_to_milliseconds(fastestLapTimeString)
+            fastestLapTime = str(fastestLapTime)
+
+            # TO DO 
+            fastestLapSpeed = 415.200
+            averageLapTime = 9000.04
+            pitStopDurationTotal = 28981
+
+            # checking duplicates 
+            check_query = sql.SQL("""
+                SELECT resultId FROM Fact_RaceResults
+                WHERE raceId = %s AND driverId = %s AND constructorId = %s AND circuitId = %s AND locationId = %s 
+                AND startPosition = %s AND endPosition = %s AND laps = %s;
+                """)
+            cursor.execute(check_query, (race_id, driver_id, constructor_id, circuit_id, location_id, startPosition, endPosition, laps))
+            existing_result = cursor.fetchone()
+
+            if existing_result is None: 
+                # finally, add the result
+                result_id = generate_id_from_string(f"{race_id}_{driver_id}_{constructor_id}_{startPosition}_{endPosition}", cursor, "fact_raceresults", "resultId")             
+                insert_query = sql.SQL("""
+                INSERT INTO Fact_RaceResults (resultId, raceId, driverId, constructorId, circuitId, locationId, statusId, startPosition, endPosition, rank, points, laps, duration, fastestLap, fastestLapTime, fastestLapSpeed, averageLapTime, pitStopDurationTotal)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (resultId) DO NOTHING;
+            """)
+            
+                cursor.execute(insert_query, (
+                    result_id, race_id, driver_id, constructor_id, circuit_id, location_id, status_id, startPosition, endPosition, rank, points, 
+                    laps, duration, fastestLap, fastestLapTime, fastestLapSpeed, averageLapTime, pitStopDurationTotal
+                ))
+                print(f"Inserted new race result: ResultID={result_id}, DriverID={driver_id}, ConstructorID={constructor_id}, Start={startPosition}, End={endPosition}, Laps={laps}")
+            else:
+                print(f"Result already exists for DriverID={driver_id}, ConstructorID={constructor_id}, Start={startPosition}, End={endPosition}, Laps={laps}")
