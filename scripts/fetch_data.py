@@ -70,26 +70,54 @@ def fetch_location_data():
         print("Error fetching data from Ergast API:", response.status_code)
         return []
     
-
-def get_next_location_id(cursor):
-    cursor.execute("SELECT MAX(locationId) FROM DimensionLocation;")
-    max_id = cursor.fetchone()[0]
-    return max_id + 1 if max_id is not None else 1
-
 # fetch driver standings
-def fetch_driver_standings_data():
-    url = "http://ergast.com/api/f1/current/driverstandings.json"
+def fetch_driver_standings_data(year):
+    url = f"http://ergast.com/api/f1/{year}/driverStandings.json"
     response = requests.get(url)
 
     if response.status_code == 200:
         data = response.json()
-        season = data['MRData']['StandingsTable']['season']
-        round = data['MRData']['StandingsTable']['StandingsLists'][0]['round']
-        driver_standings = data['MRData']['StandingsTable']['StandingsLists'][0]['DriverStandings']
-        return season, round, driver_standings
+        standings_table = data['MRData']['StandingsTable']
+
+        if standings_table['StandingsLists']:
+            standings_list = standings_table['StandingsLists'][0]
+            season = standings_list['season']
+            round_number = standings_list['round']
+            driver_standings = standings_list['DriverStandings']
+
+            # Ensure driver_standings is always a list
+            if not isinstance(driver_standings, list):
+                driver_standings = [driver_standings]
+
+            standings_info = []
+
+            for standing in driver_standings:
+                driver_info = {
+                    'position': standing['position'],
+                    'positionText': standing['positionText'],
+                    'points': standing['points'],
+                    'wins': standing['wins'],
+                    'driver': {
+                        'driverId': standing['Driver']['driverId'],
+                        'givenName': standing['Driver']['givenName'],
+                        'familyName': standing['Driver']['familyName'],
+                        'dateOfBirth': standing['Driver']['dateOfBirth'],
+                        'nationality': standing['Driver']['nationality']
+                    }
+                }
+                standings_info.append(driver_info)
+
+            return {
+                'season': season,
+                'round': round_number,
+                'driver_standings': standings_info
+            }
+        else:
+            print(f"No driver standings data available for the year {year}.")
+            return None
     else:
         print("Error fetching data from Ergast API:", response.status_code)
-        return None, None, []
+        return None
 
 # race info we got from season and round
 def fetch_race_info(season, round):
@@ -121,19 +149,54 @@ def fetch_race_info(season, round):
         return None
 
 # fetch constructor standings
-def fetch_constructor_standings_data():
-    url = "http://ergast.com/api/f1/current/constructorstandings.json"
+def fetch_constructor_standings_data(year):
+    url = f"http://ergast.com/api/f1/{year}/constructorStandings.json"
     response = requests.get(url)
 
     if response.status_code == 200:
         data = response.json()
-        season = data['MRData']['StandingsTable']['season']
-        round = data['MRData']['StandingsTable']['StandingsLists'][0]['round']
-        constructor_standings = data['MRData']['StandingsTable']['StandingsLists'][0]['ConstructorStandings']
-        return season, round, constructor_standings
+        standings_table = data['MRData']['StandingsTable']
+
+        if standings_table['StandingsLists']:
+            standings_list = standings_table['StandingsLists'][0]
+            season = standings_list['season']
+            round_number = standings_list['round']
+            constructor_standings = standings_list['ConstructorStandings']
+
+            # Osiguraj da je constructor_standings uvek lista
+            if not isinstance(constructor_standings, list):
+                constructor_standings = [constructor_standings]
+
+            standings_info = []
+
+            # Iteriraj kroz svakog konstruktora u constructor_standings
+            for standing in constructor_standings:
+                constructor_info = {
+                    'position': standing['position'],
+                    'positionText': standing['positionText'],
+                    'points': standing['points'],
+                    'wins': standing['wins'],
+                    'constructor': {
+                        'constructorId': standing['Constructor']['constructorId'],
+                        'name': standing['Constructor']['name'],
+                        'nationality': standing['Constructor']['nationality']
+                    }
+                }
+                standings_info.append(constructor_info)
+
+            # Vraćamo rečnik sa svim potrebnim podacima
+            return {
+                'season': season,
+                'round': round_number,
+                'constructor_standings': standings_info
+            }
+        else:
+            print(f"No constructor standings data available for the year {year}.")
+            return None
     else:
         print("Error fetching data from Ergast API:", response.status_code)
-        return None, None, []
+        return None
+
     
 # fetch race results
 def fetch_race_results(year):
@@ -165,8 +228,8 @@ def fetch_race_results(year):
                 'results': []  # List to store results of the race
             }
 
+        if 'Results' in race:
             for result in race['Results']:
-
                 driver_info = {
                     'positionText': result['positionText'],
                     'points': result['points'],
