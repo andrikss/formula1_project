@@ -163,13 +163,11 @@ def fetch_constructor_standings_data(year):
             round_number = standings_list['round']
             constructor_standings = standings_list['ConstructorStandings']
 
-            # Osiguraj da je constructor_standings uvek lista
             if not isinstance(constructor_standings, list):
                 constructor_standings = [constructor_standings]
 
             standings_info = []
-
-            # Iteriraj kroz svakog konstruktora u constructor_standings
+            
             for standing in constructor_standings:
                 constructor_info = {
                     'position': standing['position'],
@@ -265,3 +263,26 @@ def fetch_race_results(year):
         print("Error fetching data from Ergast API:", response.status_code)
         return None
 
+# fetch last race date 
+def fetch_latest_race_date():
+    try:
+        api_url = "http://ergast.com/api/f1/current/last/results.json"
+        
+        response = requests.get(api_url)
+        response.raise_for_status()
+        
+        race_data = response.json()
+        
+        races = race_data["MRData"]["RaceTable"]["Races"]
+        
+        if races:
+            last_race = races[-1] # getting the last race in list
+            last_race_date = last_race["date"] 
+            return last_race_date
+        else:
+            print("No races found in the response.")
+            return None
+        
+    except requests.exceptions.RequestException as e:
+        print(f"Failed to fetch the last race date: {e}")
+        return None

@@ -3,7 +3,7 @@ import logging
 import pandas as pd
 import numpy as np
 import pendulum
-from kafka import KafkaConsumer
+from airflow.models import Variable
 import logging
 import json
 from airflow.decorators import dag, task
@@ -29,6 +29,10 @@ def etl_dag():
     # RESTART THE DB 
     @task()
     def restart_db():
+
+        # first deleting the variable responsible for full/incremental load
+        Variable.delete("last_scraped_race_date")
+
         pg_hook = PostgresHook(postgres_conn_id='postgres_default')
         conn = pg_hook.get_conn()
         cursor = conn.cursor()

@@ -416,10 +416,14 @@ def get_race_info(season, round):
 
 # insert driver standings into db
 def transform_insert_driver_standings(standing, cursor):
+
     # Extract season and round from the standing data
     season = standing['season']
     round_number = standing['round']
     driver_standings = standing['driver_standings']  
+
+    if isinstance(driver_standings, dict):
+        driver_standings = [driver_standings]
 
     # Fetch race information
     race = get_race_info(season, round_number)
@@ -446,7 +450,7 @@ def transform_insert_driver_standings(standing, cursor):
 
         cursor.connection.commit()
     else:
-        # Update race time if necessary
+        # Update race time if necessary (also will think about this, sometimes its not better to update)
         update_race_time(cursor, race_id, race.get('time'))
 
     print(f"Type of driver_standings: {type(driver_standings)}")
@@ -461,7 +465,7 @@ def transform_insert_driver_standings(standing, cursor):
         position = str(driver_standing['position'])
         wins = int(driver_standing['wins'])
 
-        driver = driver_standing['Driver']
+        driver = driver_standing['driver']
         given_name = driver['givenName']
         family_name = driver['familyName']
         date_of_birth = datetime.strptime(driver['dateOfBirth'], '%Y-%m-%d').date()
@@ -520,7 +524,7 @@ def get_constructor_id(cursor, constructor_name, nationality):
     result = cursor.fetchone()
     return result[0] if result else None
 
-# transform insert constructor standings # insert constructor standings 
+# transform insert constructor standings insert constructor standings 
 def transform_insert_constructor_standings(standing, cursor):
     # Extract season and round from the standing data
     season = standing['season']
@@ -564,7 +568,7 @@ def transform_insert_constructor_standings(standing, cursor):
         position = int(constructor_standing['position'])
         wins = int(constructor_standing['wins'])
 
-        constructor = constructor_standing['Constructor']
+        constructor = constructor_standing['constructor']
         constructor_name = constructor['name']
         constructor_nationality = constructor['nationality']
 

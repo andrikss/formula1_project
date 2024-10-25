@@ -30,7 +30,10 @@ with DAG(
     def consume_kafka_messages():
         logging.info("Starting Kafka Consumers...")
     
-        # Set up individual Kafka consumers for each topic
+        # Set up individual Kafka consumers for each topic 
+        # TODO 
+        # Make ONE consumer subscribed to 3 topics
+
         driver_consumer = KafkaConsumer(
             'driver_standings_topic',
             bootstrap_servers='kafka-broker-1:9092',
@@ -38,7 +41,7 @@ with DAG(
             group_id='airflow-driver-consumer-group',
             auto_offset_reset='earliest',
             consumer_timeout_ms=60000, 
-            max_poll_interval_ms=100000
+            max_poll_interval_ms=300000
         )
 
         constructor_consumer = KafkaConsumer(
@@ -48,7 +51,7 @@ with DAG(
             group_id='airflow-constructor-consumer-group',
             auto_offset_reset='earliest',
             consumer_timeout_ms=60000, 
-            max_poll_interval_ms=100000
+            max_poll_interval_ms=300000
         )
 
         race_consumer = KafkaConsumer(
@@ -58,37 +61,31 @@ with DAG(
             group_id='airflow-race-consumer-group',
             auto_offset_reset='earliest',
             consumer_timeout_ms=60000, 
-            max_poll_interval_ms=100000
+            max_poll_interval_ms=300000
         )
         driver_standings_messages = []
         constructor_standings_messages = []
         race_results_messages = []
-        batch_size = 10  # Adjust batch size as needed
 
         for driver_message in driver_consumer:
             logging.info(f"Consumed message from driver_standings_topic: {driver_message.value}")
-            driver_standings_messages.extend(driver_message.value)
-            if len(driver_standings_messages) >= batch_size:
-                break
+            driver_standings_messages.append(driver_message.value)
 
         for constructor_message in constructor_consumer:
             logging.info(f"Consumed message from constructor_standings_topic: {constructor_message.value}")
-            constructor_standings_messages.extend(constructor_message.value)
-            if len(constructor_standings_messages) >= batch_size:
-                break
+            constructor_standings_messages.append(constructor_message.value)
 
         for race_message in race_consumer:
             logging.info(f"Consumed message from race_results_topic: {race_message.value}")
             race_results_messages.extend(race_message.value)
-            if len(race_results_messages) >= batch_size:
-                break
+
 
         driver_consumer.close()
         constructor_consumer.close()
         race_consumer.close()
         logging.info("Kafka Consumer closed.")
 
-        # Return the data as dictionaries to pass between tasks
+        # return the data as dict
         return {
             "driver_standings_data": driver_standings_messages,
             "constructor_standings_data": constructor_standings_messages,
@@ -113,9 +110,7 @@ with DAG(
             cursor = conn.cursor()
 
             if driver_standings_data:
-                logging.info(f"Processing driver_standings_data with {len(driver_standings_data)} records")
                 for standing in driver_standings_data:
-                    logging.info(f"Processing standing: {standing}")
                     transform_insert_driver_standings(standing, cursor)
                 logging.info("Driver standings data loaded to the database.")
             else:
@@ -128,11 +123,13 @@ with DAG(
             else:
                 logging.warning("No constructor standings data found.")
 
-            for race in race_results_data:
-              transform_insert_race_results(race, cursor)
+            if race_results_data:
+                for race in race_results_data:
+                    transform_insert_race_results(race, cursor)
+                logging.info("Race results data loaded to the database.")
+            else:
+                logging.warning("No race results data found.")
             
-
-
             # Commit the changes
             conn.commit()
             cursor.close()
