@@ -29,60 +29,36 @@ with DAG(
     @task
     def consume_kafka_messages():
         logging.info("Starting Kafka Consumers...")
-    
-        # Set up individual Kafka consumers for each topic 
-        # TODO 
-        # Make ONE consumer subscribed to 3 topics
 
-        driver_consumer = KafkaConsumer(
-            'driver_standings_topic',
+        consumer = KafkaConsumer(
+            'driver_standings_topic', 'constructor_standings_topic', 'race_results_topic',
             bootstrap_servers='kafka-broker-1:9092',
             value_deserializer=lambda x: json.loads(x.decode('utf-8')),
-            group_id='airflow-driver-consumer-group',
+            group_id='airflow-consumer-group',
             auto_offset_reset='earliest',
-            consumer_timeout_ms=60000, 
+            consumer_timeout_ms=60000,
             max_poll_interval_ms=300000
         )
 
-        constructor_consumer = KafkaConsumer(
-            'constructor_standings_topic',
-            bootstrap_servers='kafka-broker-1:9092',
-            value_deserializer=lambda x: json.loads(x.decode('utf-8')),
-            group_id='airflow-constructor-consumer-group',
-            auto_offset_reset='earliest',
-            consumer_timeout_ms=60000, 
-            max_poll_interval_ms=300000
-        )
-
-        race_consumer = KafkaConsumer(
-            'race_results_topic',
-            bootstrap_servers='kafka-broker-1:9092',
-            value_deserializer=lambda x: json.loads(x.decode('utf-8')),
-            group_id='airflow-race-consumer-group',
-            auto_offset_reset='earliest',
-            consumer_timeout_ms=60000, 
-            max_poll_interval_ms=300000
-        )
         driver_standings_messages = []
         constructor_standings_messages = []
         race_results_messages = []
 
-        for driver_message in driver_consumer:
-            logging.info(f"Consumed message from driver_standings_topic: {driver_message.value}")
-            driver_standings_messages.append(driver_message.value)
+        for message in consumer:
+            topic = message.topic
+            data = message.value
+            if topic == 'driver_standings_topic':
+                logging.info(f"Consumed message from driver_standings_topic: {data}")
+                driver_standings_messages.append(data)
+            elif topic == 'constructor_standings_topic':
+                logging.info(f"Consumed message from constructor_standings_topic: {data}")
+                constructor_standings_messages.append(data)
+            elif topic == 'race_results_topic':
+                logging.info(f"Consumed message from race_results_topic: {data}")
+                race_results_messages.extend(data if isinstance(data, list) else [data])
 
-        for constructor_message in constructor_consumer:
-            logging.info(f"Consumed message from constructor_standings_topic: {constructor_message.value}")
-            constructor_standings_messages.append(constructor_message.value)
 
-        for race_message in race_consumer:
-            logging.info(f"Consumed message from race_results_topic: {race_message.value}")
-            race_results_messages.extend(race_message.value)
-
-
-        driver_consumer.close()
-        constructor_consumer.close()
-        race_consumer.close()
+        consumer.close()
         logging.info("Kafka Consumer closed.")
 
         # return the data as dict
@@ -109,6 +85,8 @@ with DAG(
         ) as conn:
             cursor = conn.cursor()
 
+            # wrapped in IFs just to be sure 
+            
             if driver_standings_data:
                 for standing in driver_standings_data:
                     transform_insert_driver_standings(standing, cursor)

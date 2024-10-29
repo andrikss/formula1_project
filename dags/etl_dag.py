@@ -56,6 +56,9 @@ def etl_dag():
     @task()
     def extract():
         df = pd.read_csv('./data/dataEngineeringDataset.csv', low_memory=False) 
+        # in dataSet there is some kind of errors in column milliseconds_pitstops - there is added row with incorrect data
+        # so we filter it just by saying this value cannot be bigger than 6 numbers
+        df = df[df['milliseconds_pitstops'] <= 999999]
         return df
     
     # DRIVER
@@ -176,31 +179,31 @@ def etl_dag():
             .rename(columns={'milliseconds_laptimes': 'total_laptimes'})
         )
 
-        # summing total pitstops duration of race by drivers, and renaming
-        pitstop_times = (
-        df[['raceId', 'driverId', 'milliseconds_pitstops']]
-        .groupby(['raceId', 'driverId'], as_index=False)['milliseconds_pitstops']
-        .sum()
-        .rename(columns={'milliseconds_pitstops': 'pitStopDuration'})
+        distinct_pitstops = df[['raceId', 'driverId', 'milliseconds_pitstops']].drop_duplicates()
+              
+        total_pitstop_duration = (
+            distinct_pitstops.groupby(['raceId', 'driverId'], as_index=False)['milliseconds_pitstops']
+            .sum()
+            .rename(columns={'milliseconds_pitstops': 'total_pitstop_duration'})
         )
+
 
         # merging these two df into original df
         df = df.merge(lap_times, on=['raceId', 'driverId'], how='left')
-        df = df.merge(pitstop_times, on=['raceId', 'driverId'], how='left')
+        df = df.merge(total_pitstop_duration, on=['raceId', 'driverId'], how='left')
 
         # copy of relevant columns
         df_race_results = df[['resultId', 'raceId', 'driverId', 'constructorId',
                         'circuitId', 'locationId', 'statusId', 'grid', 
-                        'positionText', 'points', 'laps', 
-                        'milliseconds', 'total_laptimes', 
-                        'pitStopDuration', 'fastestLap', 'fastestLapTime', 
-                        'fastestLapSpeed']].copy()
+                        'positionText', 'rank', 'points', 'laps', 
+                        'milliseconds', 'fastestLap', 'fastestLapTime', 
+                        'fastestLapSpeed',  'total_laptimes',  'total_pitstop_duration']].copy()
 
         # renaming
         df_race_results = df_race_results.rename(columns={
-        'grid': 'startPosition',
-        'positionText': 'endPosition',
-        'milliseconds' : 'duration'
+            'grid': 'startPosition',
+            'positionText': 'endPosition',
+            'milliseconds' : 'duration'
         })
 
         df_race_results.replace({'\\N': None}, inplace=True)
@@ -238,39 +241,18 @@ def etl_dag():
 
         # dont need this column anymore
         df_race_results = df_race_results.drop(columns=['total_laptimes'])
-
-        # rank calc f(x)
-        def calculate_rank(start, end):
-            try:
-                return int(start) - int(end)
-            except ValueError:
-                return None
-
-        df_race_results['rank'] = df_race_results.apply(
-            lambda row: calculate_rank(row['startPosition'], row['endPosition']), axis=1
-        )
+        column_order = [
+            'resultId', 'raceId', 'driverId', 'constructorId', 'circuitId', 'locationId', 'statusId',
+            'startPosition', 'endPosition', 'rank', 'points', 'laps', 'duration', 
+            'fastestLap', 'fastestLapTime', 'fastestLapSpeed', 'averageLapTime', 'total_pitstop_duration'
+        ]
+        df_race_results = df_race_results[column_order]
 
         # deleting duplicates
         df_race_results_cleaned = df_race_results.drop_duplicates()
 
         # \n values 
         df_race_results_cleaned.replace({'\\N': None}, inplace=True)
-
-        # remembering order of columns
-        current_columns = df_race_results_cleaned.columns.tolist()
-
-        current_columns.remove('rank')
-        current_columns.remove('pitStopDuration')
-            
-        # want my rank to be after endPosition
-        end_pos_index = current_columns.index('endPosition') + 1
-        current_columns.insert(end_pos_index, 'rank')
-            
-        # the last column is pitStopDuration
-        current_columns.append('pitStopDuration')
-            
-        # new order of columns
-        df_race_results_cleaned = df_race_results_cleaned[current_columns]
 
         return df_race_results_cleaned
       

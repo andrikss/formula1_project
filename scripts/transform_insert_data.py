@@ -666,6 +666,9 @@ def get_status_id(cursor, status_name):
     
 # time conversion 
 def convert_time_to_milliseconds(time_string):
+    if not time_string or time_string == 'N/A':
+        return None
+
     milliseconds = 0
 
     # Split the time string into minutes and seconds
@@ -770,8 +773,6 @@ def transform_insert_race_results(race, cursor):
     else:
         print(f"No circuit and location information found for season {season}, round {round_num}.")
 
-    
-
     for result in race['results']:
         # DRIVER 
         driver_info = result['driver']
@@ -818,38 +819,26 @@ def transform_insert_race_results(race, cursor):
 
         startPosition = int(result['grid'])
         endPosition = int(result['positionText'])
-        rank = startPosition - endPosition
-        rank = int(rank)
 
         # because end position is string in our DB becuase of 'D N E R' 
         endPosition = str(result['positionText'])
         points = float(result['points'])
         laps = int(result['laps'])
+        duration = replace_na(result['time'])
 
+        fastestLapInfo = result['fastestLap']
+        rank = fastestLapInfo['rank']
+        rank = replace_na(rank)
 
-        # hard coding 
-        # will think about this later
-        duration = result.get('Time', {}).get('millis', None)
-        if duration is not None:
-            duration = convert_time_to_milliseconds(duration)
-            duration = int(duration)
-        else:
-            duration = 0
-
-        fastestLap = result.get('FastestLap', {}).get('lap', None)
-        if fastestLap is not None:
-            fastestLap = int(fastestLap)
-        else: 
-            fastestLap = 0
-
-        fastestLapTimeString = result.get('FastestLap', {}).get('Time', {}).get('time', '0:0.0')
+        fastestLap = replace_na(fastestLapInfo['lap'])
+        fastestLapTimeString = replace_na(fastestLapInfo['time'])
         fastestLapTime = convert_time_to_milliseconds(fastestLapTimeString)
-        fastestLapTime = str(fastestLapTime)
+        fastestLapTime = replace_na(fastestLapTime)
+        fastestLapSpeed = replace_na(fastestLapInfo['speed'])
 
-        # TO DO 
-        fastestLapSpeed = 415.200
-        averageLapTime = 9000.04
-        pitStopDurationTotal = 28981
+        averageLapTime = replace_na(result['averageLapSpeed'])
+        
+        pitStopDurationTotal = replace_na(result['totalPitStopDuration'])
 
         # checking duplicates 
         check_query = sql.SQL("""
@@ -876,3 +865,7 @@ def transform_insert_race_results(race, cursor):
             print(f"Inserted new race result: ResultID={result_id}, DriverID={driver_id}, ConstructorID={constructor_id}, Start={startPosition}, End={endPosition}, Laps={laps}")
         else:
             print(f"Result already exists for DriverID={driver_id}, ConstructorID={constructor_id}, Start={startPosition}, End={endPosition}, Laps={laps}")
+
+
+def replace_na(value):
+    return None if value == 'N/A' else value

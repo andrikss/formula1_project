@@ -14,7 +14,9 @@ from fetch_data import (
     fetch_driver_standings_data,
     fetch_constructor_standings_data,
     fetch_race_results,
-    fetch_latest_race_date
+    fetch_latest_race_date,
+    fetch_driver_standings_data_by_round,
+    fetch_constructor_standings_data_by_round
 )
 
 default_args = {
@@ -29,6 +31,7 @@ def check_for_new_data(**context):
     # full scrape
     if last_scraped_race_date is None:
         context['ti'].xcom_push(key='scrape_all_data', value=True)
+        context['ti'].xcom_push(key='skip_scraping', value=False)
     else:
         latest_race_date = fetch_latest_race_date()
 
@@ -37,6 +40,7 @@ def check_for_new_data(**context):
             context['ti'].xcom_push(key='scrape_all_data', value=False)
             context['ti'].xcom_push(key='last_scraped_race_date', value=last_scraped_race_date)
             context['ti'].xcom_push(key='latest_race_date', value=latest_race_date)
+            context['ti'].xcom_push(key='skip_scraping', value=False)
         else:
             # skip
             context['ti'].xcom_push(key='scrape_all_data', value=False)
@@ -118,7 +122,7 @@ def scrape_new_data(producer, last_scraped_race_date, latest_race_date, **contex
     for year in range(last_scraped_year, latest_year + 1):
         logging.info(f'Scraping data for year {year}')
 
-        #  need to somehow filter standings
+        # filtering fetched results
         race_results = fetch_race_results(year)
         if year == last_scraped_year:
             filtered_race_results = filter_races_by_date(race_results, last_scraped_race_date)
@@ -126,26 +130,33 @@ def scrape_new_data(producer, last_scraped_race_date, latest_race_date, **contex
             filtered_race_results = race_results
        
         if not filtered_race_results.get("races"):
-            logging.info("No race data available for this year; setting skip_scraping flag and stopping.")
+            # data on the api is not yet updated
             context['ti'].xcom_push(key='skip_scraping', value=True)
-            return  # Exit the function immediately 
+            return  # exit the function immediately 
 
         race_results_df = pd.DataFrame(filtered_race_results['races'])
         send_dataframe_to_kafka(race_results_df, 'race_results_topic', producer)
-        # Update latest fetched race date for incremental scraping
+        # update last fetched race for variable
         latest_fetched_race_date = max([race['date'] for race in race_results['races']])
 
-        driver_data = fetch_driver_standings_data(year)      
-        if driver_data:
-            producer.send('driver_standings_topic', value=driver_data)
-            producer.flush()
+        for race in filtered_race_results['races']:
+            round_number = race['round']
 
-        constructor_data = fetch_constructor_standings_data(year)   
-        if constructor_data:
-            producer.send('constructor_standings_topic', value=constructor_data)
-            producer.flush()
+             # fetch driver standings by round
+            driver_data = fetch_driver_standings_data_by_round(year, round_number)
+            if driver_data:
+                print(f"Fetched driver standings for year {year}, round {round_number}: {driver_data}")
+                producer.send('driver_standings_topic', value=driver_data)
+                producer.flush()
 
-    # Set the Airflow variable to the latest race date from incremental scrape
+            # fetch constructor standings by round
+            constructor_data = fetch_constructor_standings_data_by_round(year, round_number)
+            if constructor_data:
+                print(f"Fetched constructor standings for year {year}, round {round_number}: {constructor_data}")
+                producer.send('constructor_standings_topic', value=constructor_data)
+                producer.flush()
+
+    # set the Airflow variable to the latest race date from incremental scrape
     if latest_fetched_race_date:
         Variable.set("last_scraped_race_date", latest_fetched_race_date)
 
@@ -159,6 +170,8 @@ def scrape_new_data(producer, last_scraped_race_date, latest_race_date, **contex
 def main(**context):
     scrape_all_data_flag = context['ti'].xcom_pull(key='scrape_all_data')
     skip_scraping = context['ti'].xcom_pull(key='skip_scraping')
+    print(f"scrape_all_data_flag: {scrape_all_data_flag}, type: {type(scrape_all_data_flag)}")
+    print(f"skip_scraping: {skip_scraping}, type: {type(skip_scraping)}")
 
     # if its true - skip
     if skip_scraping:
@@ -193,7 +206,8 @@ def main(**context):
                 return
 
     except Exception as e:
-        logging.error(f'Error occurred: {e}')
+        print(f'Type of e: {type(e)}') 
+        logging.error(f'Error occurred: {e}') 
 
     finally:
         if producer:
