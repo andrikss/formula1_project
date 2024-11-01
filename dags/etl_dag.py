@@ -18,7 +18,7 @@ def adapt_numpy_int64(n):
 register_adapter(np.int64, adapt_numpy_int64)
 
 @dag(
-    schedule_interval=None, 
+     schedule_interval="0 4 * * *",
     start_date=pendulum.datetime(2023, 1, 1, tz="UTC"),
     catchup=False,
     max_active_tasks=3

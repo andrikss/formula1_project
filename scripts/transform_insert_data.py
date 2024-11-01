@@ -34,7 +34,7 @@ def generate_id_from_string(string_id, cursor, table_name, id_column):
         existing_row = cursor.fetchone()
         attempts += 1
 
-    if attempts >= 20:
+    if attempts >= 30:
     # try to make a new ID, that doesnt already exist, for 20 times, this is just borderline case
         print(f"Could not generate a unique  ID. Skipping.") 
         return None
@@ -754,7 +754,7 @@ def transform_insert_race_results(race, cursor):
             ON CONFLICT (circuitId) DO NOTHING;
         """)
             
-            cursor.execute(insert_circuit_query, (circuit_id, circuit_info['circuitName'], circuit_info['location']['lat'], circuit_info['location']['lng'], None))
+            cursor.execute(insert_circuit_query, (circuit_id, circuit_info['circuitName'], circuit_info['location']['lat'], circuit_info['location']['long'], None))
 
         # then location
         location = circuit_info.get('location', None)
@@ -768,7 +768,7 @@ def transform_insert_race_results(race, cursor):
                     INSERT INTO DimensionLocation (locationId, location, country)
                     VALUES (%s, %s, %s);
                     """,
-                    (location_id, circuit_info['locality'], circuit_info['country'])
+                    (location_id, circuit_info['location']['locality'], circuit_info['location']['country'])
                 )
     else:
         print(f"No circuit and location information found for season {season}, round {round_num}.")
@@ -818,9 +818,8 @@ def transform_insert_race_results(race, cursor):
             print(f"Inserted new status: StatusID={status_id}, Name={result['status']}")
 
         startPosition = int(result['grid'])
-        endPosition = int(result['positionText'])
 
-        # because end position is string in our DB becuase of 'D N E R' 
+        # because end position is string in DB becuase of 'D N E R' 
         endPosition = str(result['positionText'])
         points = float(result['points'])
         laps = int(result['laps'])
@@ -844,9 +843,9 @@ def transform_insert_race_results(race, cursor):
         check_query = sql.SQL("""
             SELECT resultId FROM Fact_RaceResults
             WHERE raceId = %s AND driverId = %s AND constructorId = %s AND circuitId = %s AND locationId = %s 
-            AND startPosition = %s AND endPosition = %s AND laps = %s;
+            AND startPosition = %s AND endPosition = %s AND laps = %s AND duration = %s AND points = %s AND averageLapTime = %s AND pitStopDurationTotal = %s;
             """)
-        cursor.execute(check_query, (race_id, driver_id, constructor_id, circuit_id, location_id, startPosition, endPosition, laps))
+        cursor.execute(check_query, (race_id, driver_id, constructor_id, circuit_id, location_id, startPosition, endPosition, laps, duration, points, averageLapTime, pitStopDurationTotal))
         existing_result = cursor.fetchone()
 
         if existing_result is None: 
@@ -862,10 +861,9 @@ def transform_insert_race_results(race, cursor):
                 result_id, race_id, driver_id, constructor_id, circuit_id, location_id, status_id, startPosition, endPosition, rank, points, 
                 laps, duration, fastestLap, fastestLapTime, fastestLapSpeed, averageLapTime, pitStopDurationTotal
             ))
-            print(f"Inserted new race result: ResultID={result_id}, DriverID={driver_id}, ConstructorID={constructor_id}, Start={startPosition}, End={endPosition}, Laps={laps}")
+            print(f"Inserted new race result: RaceName = {race_name}, ResultID={result_id}, DriverID={driver_id}, ConstructorID={constructor_id}, Start={startPosition}, End={endPosition}, Laps={laps}")
         else:
-            print(f"Result already exists for DriverID={driver_id}, ConstructorID={constructor_id}, Start={startPosition}, End={endPosition}, Laps={laps}")
-
+            print(f"Result already exists for RaceName={race_name} DriverID={driver_id}, ConstructorID={constructor_id}, Start={startPosition}, End={endPosition}, Laps={laps}")
 
 def replace_na(value):
     return None if value == 'N/A' else value

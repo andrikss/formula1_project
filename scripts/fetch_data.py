@@ -194,6 +194,8 @@ def fetch_constructor_standings_data(year):
         return None
 
 # fetch race results
+import requests
+
 def fetch_race_results(year):
     url = f"http://ergast.com/api/f1/{year}/results.json"
     response = requests.get(url)
@@ -223,45 +225,45 @@ def fetch_race_results(year):
                 'results': []  # List to store results of the race
             }
 
-        if 'Results' in race:
-            for result in race['Results']:
-                driverId = result['Driver']['driverId']
-                laps = int(result['laps'])
-                # calculate avg lap speed
-                averageLapSpeed = findAverageLapSpeed(year, race['round'], driverId, laps)
+            if 'Results' in race:
+                for result in race['Results']:
+                    driverId = result['Driver']['driverId']
+                    laps = int(result['laps'])
 
-                # calculate total pit stop duration
-                pitStopDurationTotal = findPitStopDurationTotal(year, race['round'], driverId)
+                    # calculate avg lap speed
+                    averageLapSpeed = findAverageLapSpeed(year, race['round'], driverId, laps)
 
-                driver_info = {
-                    'positionText': result['positionText'],
-                    'points': result['points'],
-                    'driver': {
-                        'driverId': result['Driver']['driverId'],
-                        'givenName': result['Driver']['givenName'],
-                        'familyName': result['Driver']['familyName'],
-                        'dateOfBirth': result['Driver']['dateOfBirth'],
-                        'nationality': result['Driver']['nationality'],
-                    },
-                    'constructor': {
-                        'name': result['Constructor']['name'],
-                        'nationality': result['Constructor']['nationality'],
-                    },
-                    
-                    'grid': result['grid'],
-                    'laps': result['laps'],
-                    'status': result['status'],
-                    'time': result.get('Time', {}).get('millis', 'N/A'),
-                    'fastestLap': {
-                        'rank': result.get('FastestLap', {}).get('rank', 'N/A'),
-                        'lap': result.get('FastestLap', {}).get('lap', 'N/A'),
-                        'time': result.get('FastestLap', {}).get('Time', {}).get('time', 'N/A'),
-                        'speed': result.get('FastestLap', {}).get('AverageSpeed', {}).get('speed', 'N/A'),
-                    },
-                    'averageLapSpeed': averageLapSpeed,
-                    'totalPitStopDuration': pitStopDurationTotal
-                }
-                race_details['results'].append(driver_info)
+                    # calculate total pit stop duration
+                    pitStopDurationTotal = findPitStopDurationTotal(year, race['round'], driverId)
+
+                    driver_info = {
+                        'positionText': result['positionText'],
+                        'points': result['points'],
+                        'driver': {
+                            'driverId': result['Driver']['driverId'],
+                            'givenName': result['Driver']['givenName'],
+                            'familyName': result['Driver']['familyName'],
+                            'dateOfBirth': result['Driver']['dateOfBirth'],
+                            'nationality': result['Driver']['nationality'],
+                        },
+                        'constructor': {
+                            'name': result['Constructor']['name'],
+                            'nationality': result['Constructor']['nationality'],
+                        },
+                        'grid': result['grid'],
+                        'laps': result['laps'],
+                        'status': result['status'],
+                        'time': result.get('Time', {}).get('millis', 'N/A'),
+                        'fastestLap': {
+                            'rank': result.get('FastestLap', {}).get('rank', 'N/A'),
+                            'lap': result.get('FastestLap', {}).get('lap', 'N/A'),
+                            'time': result.get('FastestLap', {}).get('Time', {}).get('time', 'N/A'),
+                            'speed': result.get('FastestLap', {}).get('AverageSpeed', {}).get('speed', 'N/A'),
+                        },
+                        'averageLapSpeed': averageLapSpeed,
+                        'totalPitStopDuration': pitStopDurationTotal
+                    }
+                    race_details['results'].append(driver_info)
 
             race_info.append(race_details)
 
@@ -271,6 +273,7 @@ def fetch_race_results(year):
     else:
         print("Error fetching data from Ergast API:", response.status_code)
         return None
+
 
 # fetch last race date 
 def fetch_latest_race_date():
@@ -345,7 +348,6 @@ def fetch_driver_standings_data_by_round(year, round_number):
         print("Error fetching data from API:", response.status_code)
         return None
     
-
 # fetch constructor standings by year and num
 def fetch_constructor_standings_data_by_round(year, round_number):
     url = f"http://ergast.com/api/f1/{year}/{round_number}/constructorStandings.json"
@@ -416,19 +418,18 @@ def findAverageLapSpeed(year, round_num, driverId, laps):
         )
 
         average_lap_time = total_lap_time / laps if laps > 0 else 0
-        print(f"Average Lap Speed for driver {driverId} in {year} round {round_num}: {average_lap_time:.3f} seconds")
         return round(average_lap_time, 3)
     else:
         print(f"Error fetching data from Ergast API for laps: {response.status_code}")
         return None
     
 def convert_duration_to_milliseconds(duration):
-    # Ako je format minuta:sekunde.milisekunde (npr. "1:09.761")
+    # "1:09.761"
     if ':' in duration:
         minutes, seconds = duration.split(':')
         total_milliseconds = (int(minutes) * 60 + float(seconds)) * 1000
     else:
-        # Ako je format samo sekunde.milisekunde (npr. "21.958")
+        #  "21.958"
         total_milliseconds = float(duration) * 1000
     
     return total_milliseconds
@@ -442,7 +443,6 @@ def findPitStopDurationTotal(year, round_num, driverId):
         races = data['MRData']['RaceTable']['Races']
 
         if not races:
-            print("No race data found.")
             return None
 
         total_duration = 0
@@ -450,11 +450,10 @@ def findPitStopDurationTotal(year, round_num, driverId):
         for race in races:
             for pit_stop in race.get('PitStops', []):
                 if pit_stop['driverId'] == driverId:
-                    # Konvertuj i saberi vreme trajanja pit stopova
                     duration_ms = convert_duration_to_milliseconds(pit_stop['duration'])
                     total_duration += duration_ms
 
-        print(f"Total pit stop duration for driver {driverId}: {total_duration} milliseconds")
+        
         return round(total_duration, 3)
     else:
         print("Error fetching data from Ergast API:", response.status_code)
@@ -494,3 +493,80 @@ def convert_time_to_milliseconds(time_string):
     milliseconds = (minutes * 60 * 1000) + (seconds * 1000) + millis
 
     return milliseconds
+
+
+# fetch race results by year and round
+def fetch_race_results_by_round(year, round):
+    url = f"http://ergast.com/api/f1/{year}/{round}/results.json"
+    response = requests.get(url)
+    if response.status_code == 200:
+        data = response.json()
+        races = data['MRData']['RaceTable']['Races']
+        
+        race_info = [] 
+        for race in races:
+            race_details = {
+                'season': race['season'],
+                'round': race['round'],
+                'raceName': race['raceName'],
+                'date': race['date'],
+                'time': race.get('time', 'N/A'),
+                'circuit': {
+                    'circuitName': race['Circuit']['circuitName'],
+                    'location': {
+                        'lat': race['Circuit']['Location']['lat'],
+                        'long': race['Circuit']['Location']['long'],
+                        'locality': race['Circuit']['Location']['locality'],
+                        'country': race['Circuit']['Location']['country']
+                    }
+                },
+                'results': []  
+            }
+            
+            # Process results data if available
+            if 'Results' in race:
+                for result in race['Results']:
+                    driverId = result['Driver']['driverId']
+                    laps = int(result['laps'])
+
+                    # calculate avg lap speed
+                    averageLapSpeed = findAverageLapSpeed(year, race['round'], driverId, laps)
+
+                    # calculate total pit stop duration
+                    pitStopDurationTotal = findPitStopDurationTotal(year, race['round'], driverId)
+
+                    driver_info = {
+                        'positionText': result['positionText'],
+                        'points': result['points'],
+                        'driver': {
+                            'driverId': result['Driver']['driverId'],
+                            'givenName': result['Driver']['givenName'],
+                            'familyName': result['Driver']['familyName'],
+                            'dateOfBirth': result['Driver']['dateOfBirth'],
+                            'nationality': result['Driver']['nationality'],
+                        },
+                        'constructor': {
+                            'name': result['Constructor']['name'],
+                            'nationality': result['Constructor']['nationality'],
+                        },
+                        'grid': result['grid'],
+                        'laps': result['laps'],
+                        'status': result['status'],
+                        'time': result.get('Time', {}).get('millis', 'N/A'),
+                        'fastestLap': {
+                            'rank': result.get('FastestLap', {}).get('rank', 'N/A'),
+                            'lap': result.get('FastestLap', {}).get('lap', 'N/A'),
+                            'time': result.get('FastestLap', {}).get('Time', {}).get('time', 'N/A'),
+                            'speed': result.get('FastestLap', {}).get('AverageSpeed', {}).get('speed', 'N/A'),
+                        },
+                        'averageLapSpeed': averageLapSpeed,
+                        'totalPitStopDuration': pitStopDurationTotal
+                    }
+                    race_details['results'].append(driver_info)
+                
+                race_info.append(race_details)
+                
+        return {'races': race_info}
+    else:
+        print(f"Error fetching data for {year} round {round}: ", response.status_code)
+        return None 
